@@ -9,11 +9,31 @@ description = "Android-first MCP server for reading Lanhu design specs and expor
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
+authors = [
+  {name = "lantian", email = "buluesky@example.com"}
+]
+keywords = ["lanhu", "design", "ui", "android", "mcp", "design-to-code"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
 dependencies = [
   "fastmcp>=2.0.0",
   "httpx>=0.27.0",
   "python-dotenv>=1.0.0",
+  "cryptography>=41.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/buluesky/lanhu-design-mcp"
+Repository = "https://github.com/buluesky/lanhu-design-mcp"
+Issues = "https://github.com/buluesky/lanhu-design-mcp/issues"
 
 [project.optional-dependencies]
 dev = [

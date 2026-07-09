@@ -1,0 +1,57 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "name": "io.github.buluesky/lanhu-design-mcp",
+  "version": "0.1.0",
+  "description": "面向 Android 优先的 MCP 服务器，用于读取蓝湖设计稿并导出 UI 还原上下文，支持 Codex、Claude Code、Cursor 等 AI 编程助手",
+  "homepage": "https://github.com/buluesky/lanhu-design-mcp",
+  "license": "MIT",
+  "author": {
+    "name": "你的名字",
+    "email": "你的邮箱"
+  },
+  "keywords": [
+    "lanhu",
+    "design",
+    "ui",
+    "android",
+    "mcp",
+    "design-to-code"
+  ],
+  "packages": [
+    {
+      "type": "stdio",
+      "identifier": "lanhu-design-mcp",
+      "registryType": "pypi",
+      "command": "lanhu-design-mcp",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ],
+  "config": {
+    "environmentVariables": {
+      "LANHU_COOKIE": {
+        "description": "蓝湖 Cookie (格式: session=xxx; tfstk=yyy)",
+        "isRequired": false,
+        "isSecret": true
+      },
+      "AUTO_BROWSER_COOKIES": {
+        "description": "自动从浏览器获取 Cookie",
+        "default": "true"
+      },
+      "DDS_COOKIE": {
+        "description": "DDS Cookie (默认使用 LANHU_COOKIE)",
+        "isRequired": false,
+        "isSecret": true
+      },
+      "DATA_DIR": {
+        "description": "数据目录",
+        "default": "./data"
+      },
+      "HTTP_TIMEOUT": {
+        "description": "HTTP 超时时间（秒）",
+        "default": "30"
+      }
+    }
+  }
+}
