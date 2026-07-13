@@ -28,30 +28,35 @@ pip install -e .
 
 ### 2. 配置 Cookie
 
-#### 方式 A: 自动模式（推荐）
+#### 方式 A: CAgent 共享 Cookie 文件（推荐）
 
-使用交互式配置工具：
-
-```bash
-python tools/setup_cookies.py
-```
-
-选择 "1. 自动模式"，系统会尝试从浏览器（Chrome/Safari）自动读取蓝湖 Cookie。
-
-#### 方式 B: 手动模式
-
-如果自动获取失败，可以手动配置：
-
-1. 复制 `.env.example` 为 `.env`
-2. 运行配置工具选择 "2. 手动模式"，或直接编辑 `.env` 文件：
+将 Cookie 保存到 CAgent 共享目录，与 Wiki MCP 等工具共用：
 
 ```bash
-# 禁用自动获取
-AUTO_BROWSER_COOKIES=false
-
-# 手动填写 Cookie
-LANHU_COOKIE="session=xxx; tfstk=yyy"
+mkdir -p ~/.config/cagent/lanhu
+printf '%s\n' 'session=xxx; tfstk=yyy' > ~/.config/cagent/lanhu/cookie.txt
+chmod 600 ~/.config/cagent/lanhu/cookie.txt
 ```
+
+系统会自动读取 `~/.config/cagent/lanhu/cookie.txt`，无需额外配置。
+
+#### 方式 B: Cookie 文件环境变量
+
+指定自定义 Cookie 文件路径：
+
+```bash
+export LANHU_COOKIE_FILE=/path/to/cookie.txt
+```
+
+#### 方式 C: 环境变量直接配置
+
+```bash
+export LANHU_COOKIE="session=xxx; tfstk=yyy"
+```
+
+#### 方式 D: 浏览器自动导入（备用方案）
+
+设置 `AUTO_BROWSER_COOKIES=true`，系统会尝试从浏览器（Chrome/Safari）读取 Cookie。自动导入是备用的可选路径，不推荐作为主要方式。
 
 ### 获取蓝湖 Cookie（手动方式）
 
@@ -64,8 +69,12 @@ LANHU_COOKIE="session=xxx; tfstk=yyy"
 ## 配置选项
 
 ```bash
-# 自动从浏览器获取 Cookie（推荐）
-AUTO_BROWSER_COOKIES=true
+# 自动从浏览器获取 Cookie（备用方案）
+AUTO_BROWSER_COOKIES=false
+
+# Cookie 文件路径（优先于环境变量）
+LANHU_COOKIE_FILE=""
+DDS_COOKIE_FILE=""
 
 # 手动配置 Cookie（如果自动获取失败）
 LANHU_COOKIE="session=...; tfstk=..."
@@ -91,17 +100,14 @@ SERVER_PORT=8000
 
 在 Claude Desktop 或其他 MCP 客户端的配置文件中添加：
 
-### 自动模式（推荐）
+### 默认模式（使用 CAgent Cookie 文件）
 
 ```json
 {
   "mcpServers": {
     "lanhu-design": {
       "command": "/bin/bash",
-      "args": ["/path/to/lanhu-design-mcp/run-stdio.sh"],
-      "env": {
-        "AUTO_BROWSER_COOKIES": "true"
-      }
+      "args": ["/path/to/lanhu-design-mcp/run-stdio.sh"]
     }
   }
 }
@@ -124,8 +130,25 @@ SERVER_PORT=8000
 }
 ```
 
+## Cookie 解析优先级
+
+蓝湖 Cookie 解析顺序：
+
+1. `LANHU_COOKIE_FILE` 环境变量
+2. `~/.config/cagent/lanhu/cookie.txt`（默认 CAgent 文件）
+3. `LANHU_COOKIE` 环境变量
+4. 浏览器自动导入（仅在 `AUTO_BROWSER_COOKIES=true` 时）
+5. 返回缺失 Cookie 错误
+
+DDS Cookie 解析顺序：
+
+1. `DDS_COOKIE_FILE` 环境变量
+2. `DDS_COOKIE` 环境变量
+3. 已解析的蓝湖 Cookie
+
 ## 可用工具
 
+- `lanhu_health_check()` - 检查本地配置状态（不访问网络，不返回 Cookie 值）
 - `lanhu_get_designs(url)` - 获取项目的所有设计图列表
 - `lanhu_analyze_design(url, design_name_or_index = null, target_platform = "android")` - 分析指定设计稿
 - `lanhu_get_design_assets(url, design_name_or_index = null, target_platform = "android")` - 获取设计资源下载信息

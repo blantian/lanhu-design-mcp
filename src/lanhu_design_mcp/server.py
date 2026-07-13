@@ -4,12 +4,36 @@ from typing import Annotated, Literal
 
 from fastmcp import FastMCP
 
-from .config import get_settings
+from .config import default_lanhu_cookie_file, get_settings
 from .design_service import DesignService
 
 TargetPlatformArg = Literal["web", "android", "ios", "wechat_miniprogram"]
 
 mcp = FastMCP("Lanhu Design MCP")
+
+
+@mcp.tool()
+async def lanhu_health_check() -> dict:
+    """Return local configuration status without accessing the network or exposing cookie values."""
+    settings = get_settings()
+    return {
+        "configured": bool(settings.lanhu_cookie),
+        "cookieSource": settings.lanhu_cookie_source,
+        "cookieFile": str(settings.lanhu_cookie_file) if settings.lanhu_cookie_file else None,
+        "cookieNames": settings.lanhu_cookie_names,
+        "ddsCookieSource": settings.dds_cookie_source,
+        "ddsCookieFile": str(settings.dds_cookie_file) if settings.dds_cookie_file else None,
+        "ddsCookieNames": settings.dds_cookie_names,
+        "defaultCookieFile": str(default_lanhu_cookie_file()),
+        "sdk": "fastmcp",
+        "tools": [
+            "lanhu_health_check",
+            "lanhu_get_designs",
+            "lanhu_analyze_design",
+            "lanhu_get_design_assets",
+            "lanhu_export_ui_context",
+        ],
+    }
 
 
 @mcp.tool()
