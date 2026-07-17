@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 from .client import LanhuClient
 from .config import get_settings
+from .design_assets import assign_suggested_paths, extract_design_slices, sanitize_asset_name
 from .design_ir import summarize_schema
 from .platform_units import TargetPlatform
 from .url_parser import LanhuUrl, parse_lanhu_url
@@ -74,23 +77,46 @@ class DesignService:
         design_name_or_index: str | int | None = None,
         target_platform: TargetPlatform = "android",
     ) -> dict[str, Any]:
-        analysis = await self.analyze_design(url, design_name_or_index, target_platform)
-        design = analysis["design"]
-        original_url = (design.get("url") or "").split("?", 1)[0]
+        ref = parse_lanhu_url(url)
+        warnings: list[str] = []
+        async with LanhuClient(self.settings) as client:
+            design_data = await client.get_designs(ref)
+            design = resolve_design(design_data["designs"], ref, design_name_or_index)
+            design_name = sanitize_asset_name(str(design.get("name") or "design"), "design")
+            design_asset = {
+                "kind": "design_image",
+                "name": design_name,
+                "format": "png",
+                "remote_url": (design.get("url") or "").split("?", 1)[0],
+            }
+            try:
+                source_data = await client.get_design_asset_source(ref, design["id"])
+                extracted = extract_design_slices(source_data["source"], str(design["id"]))
+                slices = extracted["slices"]
+                warnings.extend(extracted["warnings"])
+                slice_scale = extracted["slice_scale"]
+                version = source_data.get("version")
+                status = "success"
+            except (httpx.HTTPError, RuntimeError, ValueError, TypeError) as exc:
+                slices, slice_scale, version = [], None, None
+                warnings.append(f"Fine-grained assets unavailable: {exc}")
+                status = "partial_success"
+
+        assets = [design_asset, *slices]
+        assign_suggested_paths(assets, str(design["id"]))
+        design_asset["name"] = f"{design_name}.png"
+        design_asset.pop("format")
         return {
-            "status": "success",
-            "project": analysis["project"],
+            "status": status,
+            "project": {"id": ref.project_id, "name": design_data.get("project_name")},
             "design": design,
             "target_platform": target_platform,
-            "assets": [
-                {
-                    "kind": "design_image",
-                    "name": f"{design.get('name')}.png",
-                    "remote_url": original_url,
-                    "suggested_local_path": f"assets/lanhu/{design.get('id')}/{design.get('name')}.png",
-                }
-            ],
-            "note": "Fine-grained slice export will be added after the compact DesignIR MVP is verified.",
+            "version": version,
+            "slice_scale": slice_scale,
+            "total_assets": len(assets),
+            "total_slices": len(slices),
+            "assets": assets,
+            "warnings": warnings,
         }
 
     async def export_ui_context(

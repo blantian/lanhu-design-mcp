@@ -60,7 +60,7 @@ async def lanhu_get_design_assets(
     design_name_or_index: Annotated[str | None, "Design exact name, list index, image_id, or omitted when URL contains image_id."] = None,
     target_platform: Annotated[TargetPlatformArg, "Output platform: web/android/ios/wechat_miniprogram."] = "android",
 ) -> dict:
-    """Return asset download mapping for a Lanhu design."""
+    """Return the full design image and fine-grained downloadable slice assets."""
     return await DesignService().get_design_assets(url, design_name_or_index, target_platform)
 
 
