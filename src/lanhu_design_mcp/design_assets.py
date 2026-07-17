@@ -79,3 +79,111 @@ def assign_suggested_paths(assets: list[dict[str, Any]], design_id: str) -> None
         counts[stem] = counts.get(stem, 0) + 1
         suffix = "" if counts[stem] == 1 else f"_{counts[stem]}"
         asset["suggested_local_path"] = f"assets/lanhu/{design_id}/{stem}{suffix}.{extension}"
+
+
+def _frame(obj: dict[str, Any]) -> dict[str, Any]:
+    for key in ("frame", "bounds", "layerOriginFrame", "ddsOriginFrame"):
+        value = obj.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _number(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _metadata(obj: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    if obj.get("fills"): result["fills"] = obj["fills"]
+    if obj.get("borders") or obj.get("strokes"): result["borders"] = obj.get("borders") or obj.get("strokes")
+    if "opacity" in obj: result["opacity"] = obj["opacity"]
+    if obj.get("rotation"): result["rotation"] = obj["rotation"]
+    if obj.get("textStyle"): result["text_style"] = obj["textStyle"]
+    if obj.get("shadows"): result["shadows"] = obj["shadows"]
+    if obj.get("radius") or obj.get("cornerRadius"): result["border_radius"] = obj.get("radius") or obj.get("cornerRadius")
+    return result
+
+
+def _normalized_slice(
+    obj: dict[str, Any], image: dict[str, Any], slice_scale: int,
+    parent_name: str, layer_path: str, include_metadata: bool,
+) -> dict[str, Any] | None:
+    png_url = image.get("imageUrl")
+    svg_url = image.get("svgUrl")
+    remote_url = png_url or svg_url
+    if not remote_url:
+        return None
+    frame = _frame(obj)
+    image_size = image.get("size") if isinstance(image.get("size"), dict) else {}
+    width = _number(image_size.get("width") or frame.get("width"))
+    height = _number(image_size.get("height") or frame.get("height"))
+    asset: dict[str, Any] = {
+        "kind": "slice", "id": obj.get("id"), "name": obj.get("name") or "slice",
+        "type": obj.get("type") or obj.get("layerType") or obj.get("ddsType") or "bitmap",
+        "format": "png" if png_url else "svg", "remote_url": remote_url,
+        "layer_path": layer_path,
+    }
+    if svg_url and png_url: asset["svg_url"] = svg_url
+    if png_url and width and height:
+        asset["scale_urls"] = build_scale_urls(png_url, width, height, slice_scale)
+    if width and height:
+        asset["logical_size"] = {"width": int(round(width)), "height": int(round(height))}
+    x = frame.get("x", frame.get("left", obj.get("left")))
+    y = frame.get("y", frame.get("top", obj.get("top")))
+    if x is not None and y is not None:
+        asset["position_px"] = {"x": int(round(_number(x))), "y": int(round(_number(y)))}
+    if parent_name: asset["parent_name"] = parent_name
+    metadata = _metadata(obj) if include_metadata else {}
+    if metadata: asset["metadata"] = metadata
+    return asset
+
+
+def extract_design_slices(source: dict[str, Any], design_id: str, include_metadata: bool = True) -> dict[str, Any]:
+    meta = source.get("meta") if isinstance(source.get("meta"), dict) else {}
+    slice_scale = int(source.get("sliceScale") or source.get("exportScale") or meta.get("sliceScale") or 2)
+    is_figma = ((meta.get("host") or {}).get("name") or "").lower() == "figma"
+    slices: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    skipped_candidates = 0
+    flat_names = {
+        item.get("id"): str(item.get("name") or "")
+        for item in source.get("info") or []
+        if isinstance(item, dict) and item.get("id") is not None
+    }
+
+    def visit(obj: dict[str, Any], parent_name: str = "", parent_path: str = "") -> None:
+        nonlocal skipped_candidates
+        name = str(obj.get("name") or "")
+        path = f"{parent_path}/{name}" if parent_path and name else name or parent_path
+        resolved_parent = parent_name or flat_names.get(obj.get("parentID"), "")
+        image = obj.get("image") if isinstance(obj.get("image"), dict) else None
+        if image and (not is_figma or obj.get("hasExportImage") is True):
+            asset = _normalized_slice(obj, image, slice_scale, resolved_parent, path, include_metadata)
+            if asset:
+                slices.append(asset)
+            else:
+                skipped_candidates += 1
+        elif not is_figma and isinstance(obj.get("ddsImage"), dict):
+            asset = _normalized_slice(obj, obj["ddsImage"], slice_scale, resolved_parent, path, include_metadata)
+            if asset:
+                slices.append(asset)
+            else:
+                skipped_candidates += 1
+        elif "image" in obj and not isinstance(obj.get("image"), dict):
+            skipped_candidates += 1
+        for key in ("layers", "children"):
+            for child in obj.get(key) or []:
+                if isinstance(child, dict): visit(child, name or resolved_parent, path)
+
+    artboard = source.get("artboard") if isinstance(source.get("artboard"), dict) else {}
+    roots = (artboard.get("layers") or []) if artboard else (source.get("info") or [])
+    for root in roots:
+        if isinstance(root, dict): visit(root)
+    if skipped_candidates:
+        warnings.append(f"Skipped {skipped_candidates} malformed slice candidate(s)")
+    assign_suggested_paths(slices, design_id)
+    return {"slice_scale": slice_scale, "total_slices": len(slices), "slices": slices, "warnings": warnings}

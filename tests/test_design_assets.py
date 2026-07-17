@@ -33,6 +33,14 @@ def test_module_exists_and_exports_all_interfaces():
     assert callable(sanitize_asset_name)
     assert callable(assign_suggested_paths)
 
+    # Task 2: extract_design_slices must be present.
+    import lanhu_design_mcp.design_assets as da
+
+    assert hasattr(da, "extract_design_slices"), (
+        "design_assets.extract_design_slices is missing; "
+        "add the stub before proceeding to behavior tests."
+    )
+
 
 # ---------------------------------------------------------------------------
 # Behavior tests — ported from upstream scale and safe-name semantics
@@ -65,3 +73,85 @@ def test_safe_names_and_collisions_are_deterministic():
     assign_suggested_paths(assets, "design-1")
     assert assets[0]["suggested_local_path"] == "assets/lanhu/design-1/切换.png"
     assert assets[1]["suggested_local_path"] == "assets/lanhu/design-1/切换_2.png"
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Sketch and Figma slice extraction
+# ---------------------------------------------------------------------------
+
+from lanhu_design_mcp.design_assets import extract_design_slices
+
+
+def test_extracts_sketch_png_and_svg_slice():
+    source = {
+        "sliceScale": 2,
+        "info": [{
+            "id": "slice-1", "name": "切换", "type": "slice", "parentID": "group-1",
+            "layerOriginFrame": {"x": 1241, "y": 66, "width": 22, "height": 22},
+            "image": {
+                "imageUrl": "https://cdn/slice.png", "svgUrl": "https://cdn/slice.svg",
+                "size": {"width": 22, "height": 22},
+            },
+        }],
+    }
+    result = extract_design_slices(source, "design-1")
+    asset = result["slices"][0]
+    assert result["slice_scale"] == 2
+    assert asset["kind"] == "slice"
+    assert asset["remote_url"] == "https://cdn/slice.png"
+    assert asset["svg_url"] == "https://cdn/slice.svg"
+    assert asset["logical_size"] == {"width": 22, "height": 22}
+    assert asset["position_px"] == {"x": 1241, "y": 66}
+
+
+def test_figma_requires_exported_bitmap_and_ignores_fill():
+    source = {
+        "meta": {"host": {"name": "figma"}, "sliceScale": 2},
+        "artboard": {"layers": [
+            {"id": "real", "name": "icon", "type": "bitmapLayer", "hasExportImage": True,
+             "frame": {"x": 1, "y": 2, "width": 20, "height": 10},
+             "image": {"imageUrl": "https://cdn/real.png"}},
+            {"id": "fill", "name": "photo-fill", "type": "shapeLayer", "hasExportImage": False,
+             "image": {"imageUrl": "https://cdn/fill.png"},
+             "ddsImage": {"imageUrl": "https://cdn/fill-dds.png"}},
+        ]},
+    }
+    result = extract_design_slices(source, "design-1")
+    assert [item["id"] for item in result["slices"]] == ["real"]
+    assert result["slices"][0]["layer_path"] == "icon"
+
+
+def test_legacy_sketch_dds_image_uses_frame_fallback():
+    source = {"info": [{
+        "id": "legacy", "name": "legacy/icon", "left": 3, "top": 4,
+        "frame": {"width": 12, "height": 8},
+        "ddsImage": {"imageUrl": "https://cdn/legacy.png"},
+    }]}
+    asset = extract_design_slices(source, "design-1")["slices"][0]
+    assert asset["logical_size"] == {"width": 12, "height": 8}
+    assert asset["position_px"] == {"x": 3, "y": 4}
+    assert asset["suggested_local_path"].endswith("legacy_icon.png")
+
+
+def test_nested_layer_path_parent_and_metadata_are_preserved():
+    source = {"info": [{"name": "Toolbar", "children": [{
+        "id": "icon", "name": "Search", "opacity": 0.5,
+        "fills": [{"color": "#fff"}],
+        "image": {"imageUrl": "https://cdn/search.png", "size": {"width": 10, "height": 10}},
+    }]}]}
+    asset = extract_design_slices(source, "design-1")["slices"][0]
+    assert asset["parent_name"] == "Toolbar"
+    assert asset["layer_path"] == "Toolbar/Search"
+    assert asset["metadata"] == {"fills": [{"color": "#fff"}], "opacity": 0.5}
+
+
+def test_svg_only_slice_has_no_raster_scale_urls():
+    source = {"info": [{
+        "id": "vector", "name": "Vector", "image": {
+            "svgUrl": "https://cdn/vector.svg", "size": {"width": 12, "height": 12}
+        }
+    }]}
+    asset = extract_design_slices(source, "design-1")["slices"][0]
+    assert asset["format"] == "svg"
+    assert asset["remote_url"] == "https://cdn/vector.svg"
+    assert "scale_urls" not in asset
