@@ -142,6 +142,65 @@ def _normalized_slice(
     return asset
 
 
+def _extract_photoshop_slices(source: dict[str, Any], include_metadata: bool) -> list[dict[str, Any]]:
+    layers_by_id: dict[Any, dict[str, Any]] = {}
+
+    def index(obj: dict[str, Any]) -> None:
+        if obj.get("id") is not None: layers_by_id[obj["id"]] = obj
+        for key in ("layers", "children"):
+            for child in obj.get(key) or []:
+                if isinstance(child, dict): index(child)
+
+    if isinstance(source.get("board"), dict): index(source["board"])
+    for item in source.get("info") or []:
+        if isinstance(item, dict): index(item)
+
+    result: list[dict[str, Any]] = []
+    for source_asset in source.get("assets") or []:
+        if not isinstance(source_asset, dict) or source_asset.get("isSlice") is not True: continue
+        layer = layers_by_id.get(source_asset.get("id"))
+        if not isinstance(layer, dict): continue
+        images = layer.get("images") if isinstance(layer.get("images"), dict) else {}
+        png_url, svg_url = images.get("png_xxxhd"), images.get("svg")
+        remote_url = png_url or svg_url
+        if not remote_url: continue
+        base_width = _number(layer.get("width"))
+        base_height = _number(layer.get("height"))
+        bounds = source_asset.get("bounds") if isinstance(source_asset.get("bounds"), dict) else {}
+        if not base_width: base_width = _number(bounds.get("right")) - _number(bounds.get("left"))
+        if not base_height: base_height = _number(bounds.get("bottom")) - _number(bounds.get("top"))
+        asset: dict[str, Any] = {
+            "kind": "slice", "id": layer.get("id"), "name": source_asset.get("name") or layer.get("name") or "slice",
+            "type": layer.get("type") or "ps-slice", "format": "png" if png_url else "svg",
+            "remote_url": remote_url, "layer_path": source_asset.get("name") or layer.get("name") or "slice",
+        }
+        if png_url and svg_url: asset["svg_url"] = svg_url
+        if base_width > 0 and base_height > 0:
+            asset["base_size"] = {"width": int(round(base_width)), "height": int(round(base_height))}
+            asset["logical_size"] = {"width": int(round(base_width / 2)), "height": int(round(base_height / 2))}
+            if png_url: asset["scale_urls"] = build_ps_scale_urls(png_url, base_width, base_height)
+        if layer.get("left") is not None and layer.get("top") is not None:
+            asset["position_px"] = {"x": int(round(_number(layer["left"]))), "y": int(round(_number(layer["top"])))}
+        if include_metadata:
+            metadata = {"source": "photoshop", "asset_id": source_asset.get("id")}
+            if source_asset.get("scaleType") is not None: metadata["scaleType"] = source_asset["scaleType"]
+            asset["metadata"] = metadata
+        result.append(asset)
+    return result
+
+
+def _deduplicate(assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[Any, Any]] = set()
+    for asset in assets:
+        identity = asset.get("id") or asset.get("layer_path")
+        key = (identity, asset.get("remote_url"))
+        if key not in seen:
+            seen.add(key)
+            result.append(asset)
+    return result
+
+
 def extract_design_slices(source: dict[str, Any], design_id: str, include_metadata: bool = True) -> dict[str, Any]:
     meta = source.get("meta") if isinstance(source.get("meta"), dict) else {}
     slice_scale = int(source.get("sliceScale") or source.get("exportScale") or meta.get("sliceScale") or 2)
@@ -185,5 +244,13 @@ def extract_design_slices(source: dict[str, Any], design_id: str, include_metada
         if isinstance(root, dict): visit(root)
     if skipped_candidates:
         warnings.append(f"Skipped {skipped_candidates} malformed slice candidate(s)")
+    if str(source.get("type") or "").lower() == "ps":
+        slices.extend(_extract_photoshop_slices(source, include_metadata))
+    slices = _deduplicate(slices)
     assign_suggested_paths(slices, design_id)
-    return {"slice_scale": slice_scale, "total_slices": len(slices), "slices": slices, "warnings": warnings}
+    return {
+        "slice_scale": slice_scale,
+        "total_slices": len(slices),
+        "slices": slices,
+        "warnings": warnings,
+    }

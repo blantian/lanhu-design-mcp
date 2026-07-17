@@ -155,3 +155,37 @@ def test_svg_only_slice_has_no_raster_scale_urls():
     assert asset["format"] == "svg"
     assert asset["remote_url"] == "https://cdn/vector.svg"
     assert "scale_urls" not in asset
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Photoshop, deduplication, and malformed candidates
+# ---------------------------------------------------------------------------
+
+
+def test_extracts_photoshop_asset_and_deduplicates_ids():
+    source = {
+        "type": "ps",
+        "board": {"layers": [{
+            "id": "ps-1", "name": "背景", "type": "bitmap", "left": 10, "top": 20,
+            "width": 40, "height": 20,
+            "images": {"png_xxxhd": "https://cdn/ps.png", "svg": "https://cdn/ps.svg"},
+        }]},
+        "assets": [
+            {"id": "ps-1", "name": "背景", "isSlice": True, "scaleType": 2},
+            {"id": "ps-1", "name": "背景", "isSlice": True, "scaleType": 2},
+        ],
+    }
+    result = extract_design_slices(source, "design-ps")
+    assert result["total_slices"] == 1
+    asset = result["slices"][0]
+    assert asset["logical_size"] == {"width": 20, "height": 10}
+    assert asset["base_size"] == {"width": 40, "height": 20}
+    assert asset["metadata"] == {"source": "photoshop", "asset_id": "ps-1", "scaleType": 2}
+
+
+def test_duplicate_sketch_records_and_malformed_children_do_not_abort():
+    repeated = {"id": "same", "name": "icon", "image": {"imageUrl": "https://cdn/a.png", "size": {"width": 8, "height": 8}}}
+    source = {"info": [repeated, repeated, {"name": "bad", "image": "not-a-dict", "children": [None, "bad"]}]}
+    result = extract_design_slices(source, "design-1")
+    assert result["total_slices"] == 1
+    assert result["warnings"] == ["Skipped 1 malformed slice candidate(s)"]
