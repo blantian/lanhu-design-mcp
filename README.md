@@ -154,6 +154,38 @@ DDS Cookie 解析顺序：
 - `lanhu_get_design_assets(url, design_name_or_index = null, target_platform = "android")` - 获取设计资源下载信息
 - `lanhu_export_ui_context(url, design_name_or_index = null, target_platform = "android")` - 导出完整的 UI 还原上下文
 
+### 细粒度切图资源
+
+`lanhu_get_design_assets` 返回整张设计图和设计师声明的细粒度切图。整图始终是 `assets` 的第一项；其余 `kind: "slice"` 项可包含：
+
+- `remote_url`：蓝湖存储的原始 PNG 或 SVG 地址
+- `svg_url`：同时存在 PNG 和 SVG 时的矢量地址
+- `scale_urls`：Web、iOS 和 Android 多倍率 PNG 地址
+- `logical_size`、`position_px`：逻辑尺寸和画布坐标
+- `layer_path`：源设计中的图层路径
+- `suggested_local_path`：建议的本地保存路径
+
+该工具只返回下载映射，不会向调用方项目写入文件。
+
+```json
+{
+  "slice_scale": 2,
+  "total_assets": 2,
+  "total_slices": 1,
+  "assets": [
+    {"kind": "design_image", "remote_url": "https://..."},
+    {
+      "kind": "slice",
+      "name": "切换",
+      "format": "png",
+      "remote_url": "https://...",
+      "svg_url": "https://...",
+      "scale_urls": {"1x": "https://...", "2x": "https://...", "android_xhdpi": "https://..."}
+    }
+  ]
+}
+```
+
 ## 平台单位转换
 
 - Web: `px` - 蓝湖原始标注单位
