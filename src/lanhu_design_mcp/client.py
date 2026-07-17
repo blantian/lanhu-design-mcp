@@ -138,3 +138,23 @@ class LanhuClient:
         if data.get("code") != "00000":
             raise RuntimeError(data.get("msg", "Failed to get Lanhu image"))
         return data.get("data") or data.get("result") or {}
+
+    async def get_design_asset_source(self, ref: LanhuUrl, image_id: str) -> dict[str, Any]:
+        metadata = await self.get_sketch_json(ref, image_id)
+        versions = metadata.get("versions") or []
+        if not versions or not isinstance(versions[0], dict):
+            raise RuntimeError(f"Design {image_id} has no version metadata")
+        latest_version = versions[0]
+        json_url = latest_version.get("json_url")
+        if not json_url:
+            raise RuntimeError(f"Design {image_id} version metadata missing json_url")
+        response = await self.client.get(json_url)
+        response.raise_for_status()
+        source = response.json()
+        if not isinstance(source, dict):
+            raise RuntimeError(f"Design {image_id} asset source is not a JSON object")
+        return {
+            "source": source,
+            "version": latest_version.get("version_info"),
+            "json_url": json_url,
+        }
