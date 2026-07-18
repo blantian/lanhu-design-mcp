@@ -175,3 +175,32 @@ class TestPyproject:
     def test_cli_entry_point(self):
         text = Path("pyproject.toml").read_text()
         assert "lanhu-design-mcp = \"lanhu_design_mcp.cli:main\"" in text
+
+
+# ---------------------------------------------------------------------------
+# Documentation contract tests
+# ---------------------------------------------------------------------------
+
+
+class TestDocs:
+    def test_readme_has_managed_login_workflow(self):
+        readme = Path("README.md").read_text(encoding="utf-8")
+        assert "lanhu-design-mcp auth login" in readme
+        assert "lanhu_auth_login" in readme
+        assert "auth_required" in readme
+
+    def test_readme_no_auth_extra_syntax(self):
+        readme = Path("README.md").read_text(encoding="utf-8")
+        assert "lanhu-design-mcp[auth]" not in readme
+
+    def test_readme_has_managed_profile_reference(self):
+        readme = Path("README.md").read_text(encoding="utf-8")
+        assert "Chrome 配置" in readme or "Chrome profile" in readme
+
+    def test_smoke_test_doc_exists(self):
+        smoke = Path("docs/manual-auth-smoke-test.md")
+        assert smoke.exists()
+        text = smoke.read_text(encoding="utf-8")
+        assert "macOS" in text
+        assert "Linux" in text
+        assert "Windows" in text

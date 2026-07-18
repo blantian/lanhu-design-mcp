@@ -58,6 +58,19 @@ export LANHU_COOKIE="session=xxx; tfstk=yyy"
 
 设置 `AUTO_BROWSER_COOKIES=true`，系统会尝试从浏览器（Chrome/Safari）读取 Cookie。自动导入是备用的可选路径，不推荐作为主要方式。
 
+### 方式 E: 自动登录（推荐给新用户）
+
+使用专有 Chrome 本地配置进行一次性交互登录；后续会自动重用：
+
+```bash
+pip install lanhu-design-mcp
+lanhu-design-mcp auth login
+lanhu-design-mcp auth status
+lanhu-design-mcp auth logout --confirm
+```
+
+更多细节见 [自动登录管理](#自动登录管理)。
+
 ### 获取蓝湖 Cookie（手动方式）
 
 1. 在浏览器中打开 https://lanhuapp.com 并登录
@@ -137,8 +150,9 @@ SERVER_PORT=8000
 1. `LANHU_COOKIE_FILE` 环境变量
 2. `~/.config/cagent/lanhu/cookie.txt`（默认 CAgent 文件）
 3. `LANHU_COOKIE` 环境变量
-4. 浏览器自动导入（仅在 `AUTO_BROWSER_COOKIES=true` 时）
-5. 返回缺失 Cookie 错误
+4. 自动管理 Chrome 配置（推荐；通过 `lanhu-design-mcp auth login` 设置）
+5. 浏览器数据库提取（仅在 `AUTO_BROWSER_COOKIES=true` 时，备用方案）
+6. 返回缺失 Cookie 错误
 
 DDS Cookie 解析顺序：
 
@@ -153,6 +167,9 @@ DDS Cookie 解析顺序：
 - `lanhu_analyze_design(url, design_name_or_index = null, target_platform = "android")` - 分析指定设计稿
 - `lanhu_get_design_assets(url, design_name_or_index = null, target_platform = "android")` - 获取设计资源下载信息
 - `lanhu_export_ui_context(url, design_name_or_index = null, target_platform = "android")` - 导出完整的 UI 还原上下文
+- `lanhu_auth_login()` - 打开独有 Chrome 配置进行交互式 Lanhu 登录
+- `lanhu_auth_status(session_id = null)` - 报告托管认证状态（不含凭据）
+- `lanhu_auth_logout(confirm = false)` - 注销并移除托管浏览器配置
 
 ### 细粒度切图资源
 
@@ -198,7 +215,59 @@ DDS Cookie 解析顺序：
 - `python tools/setup_cookies.py` - 交互式 Cookie 配置工具
 - `python tools/get_cookies.py` - 检测浏览器 Cookie 状态
 
+## 自动登录管理
+
+`lanhu-design-mcp` 使用单独的本地 Chrome 配置文件进行一次性交互登录。工作方式：
+
+- 用户首次运行 `lanhu-design-mcp auth login` 会打开 Chrome 窗口并导航至 Lanhu。
+- 用户手动登录（密码/二维码/SSO）；不会尝试填写凭据或自动化。
+- 关闭浏览器窗口即取消；如不操作，默认五分钟超时即为 `timed_out`。
+- 成功登录后，会话 Cookie 仅保留在本地 Chrome 配置中；后续 MCP 进程重启后可自动重用。
+- 正常的设计工具（`lanhu_get_designs`、`lanhu_get_design_assets` 等） **永不意外打开可见浏览器**。
+- 当凭证过期时，设计工具会返回 `{"status":"auth_required","nextAction":"lanhu_auth_login"}`；必须调用 `lanhu_auth_login` 才会打开浏览器。
+
+**要求：** 系统需安装 Google Chrome。不会自动下载 Chromium/Playwright 浏览器。
+
+### CLI 命令
+
+```bash
+lanhu-design-mcp auth login      # 开始交互登录（会阻塞进程）
+lanhu-design-mcp auth status     # 输出安全 JSON 状态
+lanhu-design-mcp auth logout --confirm  # 移除托管配置
+```
+
+### MCP 工具
+
+- `lanhu_auth_login()` — 返回 `sessionId` 及 `waiting_for_user` 状态（非阻塞）。
+- `lanhu_auth_status(session_id)` — 可选 `session_id` 参数；返回 `authenticated` 布尔值、`cookieNames`，以及 `status`。
+- `lanhu_auth_logout(confirm)` — 需要 `confirm: true` 才会删除托管的 Chrome 配置。
+
 ## 故障排除
+
+### 自动登录：dependency_missing
+
+`dependency_missing` 状态表示 Playwright Python 库或系统 Chrome 不可用。
+
+```bash
+pip install --upgrade lanhu-design-mcp
+```
+
+如仍失败，请检查 Chrome 是否已安装。可通过手动方式使用显式 Cookie。
+
+### 自动登录：profile_locked
+
+`profile_locked` 表示另一个进程正在使用托管的 Chrome 配置。尝试再次运行前，等待该进程完成并释放锁。
+
+### 自动登录：cancelled / timed_out
+
+- `cancelled`：登录窗口在完成认证前被关闭。
+- `timed_out`：登录窗口保持打开状态 5 分钟后仍无认证 Cookie。
+
+两种情况下，托管 Chrome 配置均 **不会** 被删除；用户可再次运行 `lanhu-design-mcp auth login`。
+
+### 旧版浏览器 Cookie 回退
+
+当 `AUTO_BROWSER_COOKIES=true` 时，系统会尝试直接读取默认浏览器的 Cookie 数据库。此为对旧版用户的备用选项，并不建议作为主要方式使用，因为它的兼容性取决于平台及浏览器版本。
 
 ### 自动获取 Cookie 失败
 
