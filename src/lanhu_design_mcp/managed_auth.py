@@ -1,9 +1,4 @@
-"""Managed browser authentication foundations — pure functions only.
-
-This module owns profile paths, cookie filtering/formatting, safe result
-serialization, and marker-guarded profile lifecycle.  It does NOT import
-Playwright or launch a browser.  The async state machine is in a later task.
-"""
+"""Managed browser authentication — profiles, cookie safety, login state machine."""
 
 from __future__ import annotations
 
@@ -235,15 +230,18 @@ class PlaywrightBrowserBackend:
                 "Install automatic login with: pip install 'lanhu-design-mcp[auth]'"
             ) from exc
 
-        pw = await async_playwright().__aenter__()
+        pw = None
+        context = None
         try:
+            pw = await async_playwright().__aenter__()
             context = await pw.chromium.launch_persistent_context(
                 user_data_dir=str(profile_dir),
                 channel="chrome",
                 headless=headless,
             )
         except Exception as exc:
-            await pw.__aexit__(None, None, None)
+            if pw is not None:
+                await pw.__aexit__(None, None, None)
             msg = str(exc).lower()
             if "executable" in msg and "chrome" in msg:
                 raise AuthDependencyError("Google Chrome is required for automatic login.") from exc
@@ -252,19 +250,37 @@ class PlaywrightBrowserBackend:
             raise
 
         if not headless:
-            page = await context.new_page()
-            await page.goto("https://lanhuapp.com/", wait_until="domcontentloaded")
+            try:
+                pages = context.pages
+                page = pages[0] if pages else await context.new_page()
+                await page.goto("https://lanhuapp.com/", wait_until="domcontentloaded")
+            except Exception:
+                await context.close()
+                await pw.__aexit__(None, None, None)
+                raise
 
         class _PlaywrightSession:
+            def __init__(self_):
+                self_._closed = False
+
             async def cookies(self_):
                 return await context.cookies()
 
             def is_closed(self_):
-                return False  # managed by context.close()
+                return self_._closed
 
             async def close(self_):
-                await context.close()
-                await pw.__aexit__(None, None, None)
+                if self_._closed:
+                    return
+                self_._closed = True
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+                try:
+                    await pw.__aexit__(None, None, None)
+                except Exception:
+                    pass
 
         return _PlaywrightSession()
 
@@ -284,7 +300,8 @@ class ManagedBrowserAuth:
         self._profile_path = profile_dir
         self._timeout = timeout
         self._poll_interval = poll_interval
-        self._lock = asyncio.Lock()
+        self._state_lock = asyncio.Lock()
+        self._browser_lock = asyncio.Lock()
         self._session_id: str | None = None
         self._task: asyncio.Task[None] | None = None
         self._cached_header: str | None = None
@@ -320,6 +337,18 @@ class ManagedBrowserAuth:
         allowed = filter_lanhu_cookies(cookies)
         return any(c["name"].lower() in AUTH_COOKIE_NAMES for c in allowed)
 
+    @staticmethod
+    def _safe_dependency_message() -> str:
+        return "Automatic login dependencies are not available. Install with: pip install 'lanhu-design-mcp[auth]'"
+
+    @staticmethod
+    def _safe_profile_locked_message() -> str:
+        return "The managed browser profile is locked by another process."
+
+    @staticmethod
+    def _safe_failure_message() -> str:
+        return "An unexpected error occurred during login."
+
     # ------------------------------------------------------------------
     # public API
     # ------------------------------------------------------------------
@@ -335,23 +364,21 @@ class ManagedBrowserAuth:
         return self._snapshot().to_dict()
 
     async def start_login(self) -> dict[str, Any]:
-        if self._task and not self._task.done():
-            return self._snapshot().to_dict()
-        async with self._lock:
+        async with self._state_lock:
             if self._task and not self._task.done():
                 return self._snapshot().to_dict()
             self._session_id = uuid.uuid4().hex
             self._state = "starting"
             self._message = None
             self._task = asyncio.create_task(self._login_worker())
-            await asyncio.sleep(0)  # yield so caller gets immediate status
+            await asyncio.sleep(0)
             return self._snapshot().to_dict()
 
     async def resolve_cookie(self) -> CookieInfo:
         if self._cached_header:
             return CookieInfo(True, self._cached_header, "managed_browser", None, list(self._cached_names))
 
-        async with self._lock:
+        async with self._browser_lock:
             if self._cached_header:
                 return CookieInfo(True, self._cached_header, "managed_browser", None, list(self._cached_names))
 
@@ -366,13 +393,15 @@ class ManagedBrowserAuth:
                     cookies = await session.cookies()
                 finally:
                     await session.close()
-            except (AuthDependencyError, AuthProfileLockedError):
+            except AuthDependencyError:
+                return CookieInfo(False, "", "missing", None, [])
+            except AuthProfileLockedError:
                 return CookieInfo(False, "", "missing", None, [])
             except Exception:
                 return CookieInfo(False, "", "missing", None, [])
 
             allowed = filter_lanhu_cookies(cookies)
-            if not allowed:
+            if not self._has_auth_cookie(cookies) or not allowed:
                 return CookieInfo(False, "", "missing", None, [])
 
             header = format_cookie_header(allowed)
@@ -401,12 +430,13 @@ class ManagedBrowserAuth:
 
         self._cached_header = None
         self._cached_names = []
-        profile = self._resolve_profile()
 
-        try:
-            remove_owned_profile(profile)
-        except UnsafeProfileError:
-            pass
+        async with self._browser_lock:
+            profile = self._resolve_profile()
+            try:
+                remove_owned_profile(profile)
+            except UnsafeProfileError:
+                pass
 
         self._state = "missing"
         self._session_id = None
@@ -439,7 +469,8 @@ class ManagedBrowserAuth:
         try:
             profile = self._resolve_profile()
             ensure_owned_profile(profile)
-            session = await self._resolve_backend().open(profile, headless=False)
+            async with self._browser_lock:
+                session = await self._resolve_backend().open(profile, headless=False)
             self._state = "waiting_for_user"
             deadline = asyncio.get_event_loop().time() + self._timeout
 
@@ -447,7 +478,7 @@ class ManagedBrowserAuth:
                 remaining = deadline - asyncio.get_event_loop().time()
                 if remaining <= 0:
                     self._state = "timed_out"
-                    self._message = "Login timed out after 5 minutes."
+                    self._message = "Login timed out."
                     return
 
                 try:
@@ -470,19 +501,18 @@ class ManagedBrowserAuth:
 
                 await asyncio.sleep(self._poll_interval)
 
-        except AuthDependencyError as exc:
+        except AuthDependencyError:
             self._state = "dependency_missing"
-            self._message = str(exc)
-        except AuthProfileLockedError as exc:
+            self._message = self._safe_dependency_message()
+        except AuthProfileLockedError:
             self._state = "profile_locked"
-            self._message = str(exc)
+            self._message = self._safe_profile_locked_message()
         except asyncio.CancelledError:
             self._state = "cancelled"
             self._message = "Login was cancelled."
-        except Exception as exc:
+        except Exception:
             self._state = "failed"
-            # never leak raw exception text — it may contain cookie values
-            self._message = "An unexpected error occurred during login."
+            self._message = self._safe_failure_message()
         finally:
             if session is not None and not session.is_closed():
                 try:

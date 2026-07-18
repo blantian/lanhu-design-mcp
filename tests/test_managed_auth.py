@@ -549,13 +549,15 @@ class TestDependencyErrors:
 class TestCancellationAndTimeout:
     @pytest.mark.asyncio
     async def test_cancelled_by_closing_browser(self, tmp_path):
-        auth = _auth(profile_dir=tmp_path / "profile", timeout=0.1, poll_interval=0.05)
-        backend = FakeBackend(cookies=[])  # no auth cookie → timeout
-        auth._backend = backend
+        backend = FakeClosableBackend(cookies=[])
+        auth = _auth(backend=backend, profile_dir=tmp_path / "profile", timeout=5, poll_interval=0.05)
         await auth.start_login()
+        await asyncio.sleep(0.1)
+        if backend._last_session:
+            backend._last_session.simulate_external_close()
         await auth.wait_for_terminal_state()
         result = await auth.status()
-        assert result["status"] in {"timed_out", "failed"}
+        assert result["status"] == "cancelled"
 
     @pytest.mark.asyncio
     async def test_retry_after_terminal_failure(self, tmp_path):
@@ -593,3 +595,172 @@ class TestSingleton:
         a1 = get_managed_auth()
         a2 = get_managed_auth()
         assert a1 is a2
+
+
+# ===========================================================================
+# Task 3 fix tests
+# ===========================================================================
+
+TFSTK_ONLY = {"name": "tfstk", "value": "xyz", "domain": ".lanhuapp.com"}
+TRACKING_ONLY = {"name": "tracking", "value": "x", "domain": "lanhuapp.com"}
+
+
+class FakeClosableSession(FakeSession):
+    """Session that supports external close simulation."""
+    def __init__(self, *args, **kw):
+        super().__init__(*args, **kw)
+        self._external_close_event = asyncio.Event()
+
+    def simulate_external_close(self):
+        self._closed = True
+        self._external_close_event.set()
+
+
+class FakeClosableBackend(FakeBackend):
+    """Backend whose sessions support external close simulation."""
+    def __init__(self, *args, session_class=FakeClosableSession, **kw):
+        super().__init__(*args, **kw)
+        self.session_class = session_class
+        self._last_session = None
+
+    async def open(self, profile_dir, *, headless=False):
+        self.open_count += 1
+        if self._open_side_effect:
+            raise self._open_side_effect
+        session = self.session_class(self._cookies, event=self._cookies_after)
+        self._last_session = session
+        return session
+
+
+class BlockingBackend:
+    """Backend that blocks until an event is set."""
+    def __init__(self, cookies=None, block_event=None):
+        self._cookies = cookies or []
+        self._block_event = block_event or asyncio.Event()
+        self.open_count = 0
+
+    async def open(self, profile_dir, *, headless=False):
+        self.open_count += 1
+        await self._block_event.wait()
+        return FakeSession(self._cookies)
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: auth criterion – tracking-only cookies must not authenticate
+# ---------------------------------------------------------------------------
+
+
+class TestAuthCriterion:
+    @pytest.mark.asyncio
+    async def test_non_auth_lanhu_cookies_do_not_authenticate_profile(self, tmp_path):
+        """tfstk and tracking cookies on Lanhu domains must NOT authenticate."""
+        profile = tmp_path / "profile"
+        ensure_owned_profile(profile)
+        backend = FakeBackend(cookies=[TFSTK_ONLY, TRACKING_ONLY])
+        auth = _auth(backend=backend, profile_dir=profile)
+        info = await auth.resolve_cookie()
+        assert info.source == "missing", f"expected missing, got {info.source} with {info.cookie}"
+
+    @pytest.mark.asyncio
+    async def test_lanhu_cookies_with_session_plus_others_is_valid(self, tmp_path):
+        """session + tfstk + tracking all on allowed domains → authenticated with all."""
+        profile = tmp_path / "profile"
+        ensure_owned_profile(profile)
+        backend = FakeBackend(cookies=[LANHU_SESSION, TFSTK_ONLY, TRACKING_ONLY, OTHER_COOKIE])
+        auth = _auth(backend=backend, profile_dir=profile)
+        info = await auth.resolve_cookie()
+        assert info.source == "managed_browser"
+        assert "session=abc123" in info.cookie
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: safe error messages – never str(exc) in MCP-facing _message
+# ---------------------------------------------------------------------------
+
+
+class TestSafeMessages:
+    @pytest.mark.asyncio
+    async def test_dependency_error_message_is_fixed_safe_text(self, tmp_path):
+        backend = FakeBackend(open_side_effect=AuthDependencyError("sentinel-secret-123"))
+        auth = _auth(backend=backend, profile_dir=tmp_path / "profile")
+        await auth.start_login()
+        await auth.wait_for_terminal_state()
+        result = await auth.status()
+        assert result["status"] == "dependency_missing"
+        msg = result.get("message", "")
+        assert "sentinel-secret-123" not in msg
+
+    @pytest.mark.asyncio
+    async def test_profile_locked_message_is_fixed_safe_text(self, tmp_path):
+        backend = FakeBackend(open_side_effect=AuthProfileLockedError("sentinel-token-456"))
+        auth = _auth(backend=backend, profile_dir=tmp_path / "profile")
+        await auth.start_login()
+        await auth.wait_for_terminal_state()
+        result = await auth.status()
+        assert result["status"] == "profile_locked"
+        msg = result.get("message", "")
+        assert "sentinel-token-456" not in msg
+
+    @pytest.mark.asyncio
+    async def test_probe_profile_exposes_dependency_missing(self, tmp_path):
+        profile = tmp_path / "profile"
+        ensure_owned_profile(profile)
+        backend = FakeBackend(open_side_effect=AuthDependencyError("install hint"))
+        auth = _auth(backend=backend, profile_dir=profile)
+        result = await auth.status(probe_profile=True)
+        assert result["status"] in {"dependency_missing", "profile_locked", "missing"}
+        assert result["authenticated"] is False
+
+    @pytest.mark.asyncio
+    async def test_status_probe_on_unmarked_profile_stays_missing(self, tmp_path):
+        auth = _auth(profile_dir=tmp_path / "nonexistent")
+        result = await auth.status(probe_profile=True)
+        assert result["status"] == "missing"
+        assert result["authenticated"] is False
+
+
+# ---------------------------------------------------------------------------
+# Fix 5: serialization/races – dedicated browser lock
+# ---------------------------------------------------------------------------
+
+
+class TestBrowserLock:
+    @pytest.mark.asyncio
+    async def test_logout_waits_for_headless_resolve(self, tmp_path):
+        profile = tmp_path / "profile"
+        ensure_owned_profile(profile)
+        block = asyncio.Event()
+        backend = BlockingBackend(cookies=[LANHU_SESSION], block_event=block)
+        auth = _auth(backend=backend, profile_dir=profile)
+        # Start a headless resolve that blocks
+        resolve_task = asyncio.create_task(auth.resolve_cookie())
+        await asyncio.sleep(0.1)
+        # Logout should wait for the resolve lock before removing profile
+        logout_task = asyncio.create_task(auth.logout(confirm=True))
+        await asyncio.sleep(0.1)
+        assert not logout_task.done()  # blocked by lock
+        # Unblock resolve
+        block.set()
+        await resolve_task
+        await logout_task
+        assert logout_task.done()
+
+    @pytest.mark.asyncio
+    async def test_login_and_resolve_never_open_profile_concurrently(self, tmp_path):
+        profile = tmp_path / "profile"
+        ensure_owned_profile(profile)
+        start_block = asyncio.Event()
+        backend = BlockingBackend(cookies=[LANHU_SESSION], block_event=start_block)
+        auth = _auth(backend=backend, profile_dir=profile)
+        # Login blocks
+        login_task = asyncio.create_task(auth.start_login())
+        await asyncio.sleep(0.15)
+        # Resolve tries — should not open concurrently
+        resolve_task = asyncio.create_task(auth.resolve_cookie())
+        await asyncio.sleep(0.1)
+        # Only login opened the backend
+        assert backend.open_count <= 1
+        start_block.set()
+        await login_task
+        await resolve_task
+        assert backend.open_count <= 2
