@@ -6,6 +6,7 @@ from fastmcp import FastMCP
 
 from .config import default_lanhu_cookie_file, get_settings
 from .design_service import DesignService
+from .managed_auth import get_managed_auth
 
 TargetPlatformArg = Literal["web", "android", "ios", "wechat_miniprogram"]
 
@@ -15,7 +16,9 @@ mcp = FastMCP("Lanhu Design MCP")
 @mcp.tool()
 async def lanhu_health_check() -> dict:
     """Return local configuration status without accessing the network or exposing cookie values."""
-    settings = get_settings()
+    settings = get_settings(include_browser_fallback=False)
+    auth = get_managed_auth()
+    auth_snapshot = auth.status_now()
     return {
         "configured": bool(settings.lanhu_cookie),
         "cookieSource": settings.lanhu_cookie_source,
@@ -32,7 +35,11 @@ async def lanhu_health_check() -> dict:
             "lanhu_analyze_design",
             "lanhu_get_design_assets",
             "lanhu_export_ui_context",
+            "lanhu_auth_login",
+            "lanhu_auth_status",
+            "lanhu_auth_logout",
         ],
+        "managedAuth": auth_snapshot,
     }
 
 
@@ -74,8 +81,26 @@ async def lanhu_export_ui_context(
     return await DesignService().export_ui_context(url, design_name_or_index, target_platform)
 
 
+@mcp.tool()
+async def lanhu_auth_login() -> dict:
+    """Open a dedicated Chrome profile for interactive Lanhu sign-in (Playwright auth extra required)."""
+    return await get_managed_auth().start_login()
+
+
+@mcp.tool()
+async def lanhu_auth_status(session_id: str | None = None) -> dict:
+    """Report managed authentication state without exposing credentials."""
+    return await get_managed_auth().status(session_id, probe_profile=True)
+
+
+@mcp.tool()
+async def lanhu_auth_logout(confirm: bool = False) -> dict:
+    """Sign out and remove the managed browser profile (requires confirm=true)."""
+    return await get_managed_auth().logout(confirm)
+
+
 def main() -> None:
-    settings = get_settings()
+    settings = get_settings(include_browser_fallback=False)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     if settings.transport == "stdio":
         mcp.run(transport="stdio")

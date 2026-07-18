@@ -36,13 +36,16 @@ Repository = "https://github.com/buluesky/lanhu-design-mcp"
 Issues = "https://github.com/buluesky/lanhu-design-mcp/issues"
 
 [project.optional-dependencies]
+auth = [
+  "playwright>=1.50.0",
+]
 dev = [
   "pytest>=7.4.0",
   "pytest-asyncio>=0.21.0",
 ]
 
 [project.scripts]
-lanhu-design-mcp = "lanhu_design_mcp.server:main"
+lanhu-design-mcp = "lanhu_design_mcp.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
