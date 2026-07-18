@@ -522,8 +522,9 @@ class ManagedBrowserAuth:
 
                         await asyncio.sleep(self._poll_interval)
                 finally:
-                    # Close session while still holding the browser lock
-                    if session is not None and not session.is_closed():
+                    # Always call close while holding the lock — even if externally
+                    # closed (is_closed=True), the driver may not yet be stopped.
+                    if session is not None:
                         try:
                             await session.close()
                         except Exception:

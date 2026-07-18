@@ -893,23 +893,29 @@ class FakeContext:
         self.pages = []
         self._close_handlers = []
         self.closed = False
+        self._close_raised = False
 
     def on(self, event, handler):
         if event == "close":
             self._close_handlers.append(handler)
 
-    async def cookies(self):
-        return [LANHU_SESSION, OTHER_COOKIE]
-
-    async def close(self):
+    def fire_close(self):
         self.closed = True
         for h in self._close_handlers:
             h()
+
+    async def cookies(self):
+        return [LANHU_SESSION, OTHER_COOKIE]
 
     async def new_page(self):
         page = FakePage(self)
         self.pages.append(page)
         return page
+
+    async def close(self):
+        self.fire_close()
+        if self._close_raised:
+            raise RuntimeError("close failed")
 
 
 class FakePage:
@@ -917,13 +923,14 @@ class FakePage:
         self._close_handlers = []
         self.closed = False
         self._context = context
+        self._goto_url = None
 
     def on(self, event, handler):
         if event == "close":
             self._close_handlers.append(handler)
 
     async def goto(self, url, **kw):
-        pass
+        self._goto_url = url
 
     def fire_close(self):
         self.closed = True
@@ -932,31 +939,32 @@ class FakePage:
 
 
 class FakeBrowserType:
+    def __init__(self):
+        self._last_context = None
+
     async def launch_persistent_context(self, **kw):
-        return FakeContext()
+        ctx = FakeContext()
+        self._last_context = ctx
+        return ctx
 
 
 class FakePlaywright:
     def __init__(self):
         self.chromium = FakeBrowserType()
-        self._stopped = False
         self._exit_count = 0
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, *args):
-        self._stopped = True
         self._exit_count += 1
 
 
 class TestPlaywrightBackendAdapter:
     @staticmethod
     def _install_fake_playwright(fake_ap):
-        """Install a fake playwright.async_api module into sys.modules."""
         import sys
         import types
-
         fake_mod = types.ModuleType("playwright.async_api")
         fake_mod.async_playwright = lambda: fake_ap
         sys.modules["playwright"] = types.ModuleType("playwright")
@@ -964,44 +972,69 @@ class TestPlaywrightBackendAdapter:
         return fake_mod
 
     def test_context_close_event_sets_session_closed(self):
+        """Fire external context close → is_closed True, then close stops driver once."""
         async def run():
             backend = PlaywrightBrowserBackend()
             fp = FakePlaywright()
             self._install_fake_playwright(fp)
             session = await backend.open(Path("/tmp/fake-profile"), headless=True)
             assert not session.is_closed()
-            await session.close()
+            # Fire external context close — no owned session.close() yet
+            fp.chromium._last_context.fire_close()
             assert session.is_closed()
+            # Owned close still stops driver (driver was not stopped by event alone)
+            assert fp._exit_count == 0
+            await session.close()
             assert fp._exit_count == 1
 
         asyncio.run(run())
 
     def test_visible_mode_navigates_and_wires_page_close(self):
+        """Visible open reuses context page, navigates to Lanhu, page close fires."""
         async def run():
             backend = PlaywrightBrowserBackend()
             fp = FakePlaywright()
             self._install_fake_playwright(fp)
             session = await backend.open(Path("/tmp/fake-profile"), headless=False)
+            ctx = fp.chromium._last_context
+            assert ctx is not None
+            assert len(ctx.pages) == 1
+            page = ctx.pages[0]
+            assert page._goto_url == "https://lanhuapp.com/"
+            # No second page created when an existing page is present
+            assert len(ctx.pages) == 1
+            # Fire external page close
             assert not session.is_closed()
-            await session.close()
+            page.fire_close()
             assert session.is_closed()
+            # Owned close stops driver exactly once
+            assert fp._exit_count == 0
+            await session.close()
             assert fp._exit_count == 1
 
         asyncio.run(run())
 
     def test_navigation_failure_still_stops_playwright(self):
+        """goto raises AND context.close raises → Playwright stopped exactly once."""
         async def run():
             backend = PlaywrightBrowserBackend()
             fp = FakePlaywright()
             self._install_fake_playwright(fp)
 
-            # Patch launch_persistent_context to fail for non-headless
-            async def fail_for_visible(self, **kw):
-                if not kw.get("headless"):
+            class FailingPage(FakePage):
+                async def goto(self, url, **kw):
                     raise RuntimeError("connection refused")
-                return FakeContext()
 
-            with patch.object(FakeBrowserType, "launch_persistent_context", fail_for_visible):
+            async def launch_with_failing_goto(self, **kw):
+                ctx = FakeContext()
+                self._last_context = ctx
+                if not kw.get("headless"):
+                    page = FailingPage(ctx)
+                    ctx.pages = [page]
+                    ctx._close_raised = True
+                return ctx
+
+            with patch.object(FakeBrowserType, "launch_persistent_context", launch_with_failing_goto):
                 with pytest.raises(Exception):
                     await backend.open(Path("/tmp/fake-profile"), headless=False)
                 assert fp._exit_count == 1
@@ -1042,6 +1075,57 @@ class _BlockingCloseSession:
     async def close(self):
         self._closed = True
         await self._close_block.wait()
+
+
+class TestExternalCloseWorkerCleanup:
+    """Worker inner finally always calls owned close, even after external close."""
+
+    @pytest.mark.asyncio
+    async def test_external_close_worker_still_invokes_owned_close(self, tmp_path):
+        close_called = []
+
+        class TrackedCloseSession:
+            def __init__(self, cookies, event=None):
+                self._cookies = cookies
+                self._closed = False
+                self._event = event
+
+            async def cookies(self):
+                if self._event:
+                    await self._event.wait()
+                return list(self._cookies)
+
+            def is_closed(self):
+                return self._closed
+
+            async def close(self):
+                close_called.append(True)
+                self._closed = True
+
+        class TrackedBackend:
+            def __init__(self, cookies=None):
+                self._cookies = cookies or []
+                self.open_count = 0
+                self.last_session = None
+
+            async def open(self, profile_dir, *, headless=False):
+                self.open_count += 1
+                session = TrackedCloseSession(self._cookies)
+                self.last_session = session
+                return session
+
+        backend = TrackedBackend(cookies=[])  # no auth cookie
+        auth = _auth(backend=backend, profile_dir=tmp_path / "profile", timeout=5, poll_interval=0.05)
+        await auth.start_login()
+        await asyncio.sleep(0.1)
+        # External close happens before worker loop exits
+        backend.last_session._closed = True  # simulate browser close
+        await auth.wait_for_terminal_state()
+        result = await auth.status()
+        assert result["status"] == "cancelled"
+        # Worker's inner finally must have called close exactly once
+        assert len(close_called) == 1
+        await auth.shutdown()
 
 
 class TestCloseUnderLock:
