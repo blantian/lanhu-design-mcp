@@ -212,11 +212,83 @@ class BrowserBackend(Protocol):
     async def open(self, profile_dir: Path, *, headless: bool) -> BrowserSession: ...
 
 
+class SessionValidator(Protocol):
+    """Validate a Lanhu cookie header against the Lanhu auth endpoint.
+
+    Returns True only on explicit positive evidence (e.g. passport code=0).
+    Must fail closed on any error, non-2xx, or unexpected payload.
+    """
+
+    async def validate(self, cookie_header: str) -> bool: ...
+
+
 # =============================================================================
 # ManagedBrowserAuth — async state machine
 # =============================================================================
 
 AUTH_COOKIE_NAMES = {"session", "user_token"}
+
+
+class HttpSessionValidator:
+    """Validate a cookie header against Lanhu's account detail endpoint.
+
+    Live contract (project-independent):
+      Authenticated → HTTP 200  ``{"code": "00000", "msg": ..., "result": {...}}``
+      Anonymous     → HTTP 401  ``{"code": 30001}``
+
+    Only explicit ``code == "00000"`` on a 2xx response is accepted as
+    authenticated.  Fails closed on any other code, non-2xx status,
+    login redirect, malformed JSON, network error, or timeout.
+    """
+
+    def __init__(self, timeout: float = 10.0) -> None:
+        self._timeout = timeout
+
+    async def validate(self, cookie_header: str) -> bool:
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout, follow_redirects=True,
+            ) as client:
+                response = await client.get(
+                    "https://lanhuapp.com/api/account/user/detail",
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                        "Accept": "application/json, text/plain, */*",
+                        "Referer": "https://lanhuapp.com/web/",
+                        "request-from": "web",
+                        "Cookie": cookie_header,
+                    },
+                )
+        except Exception:
+            return False
+
+        # Only 2xx responses are eligible.
+        if response.status_code < 200 or response.status_code >= 300:
+            return False
+
+        # Auth-failure evidence on the response itself.
+        if response.status_code in {401, 418}:
+            return False
+        location = response.headers.get("location", "")
+        if response.is_redirect and "login" in location.lower():
+            return False
+        for h in response.history or ():
+            loc = h.headers.get("location", "")
+            if h.is_redirect and "login" in loc.lower():
+                return False
+
+        try:
+            data = response.json()
+        except Exception:
+            return False
+
+        if not isinstance(data, dict):
+            return False
+
+        # Explicit success contract: code == "00000"
+        return data.get("code") == "00000"
 
 
 class PlaywrightBrowserBackend:
@@ -308,11 +380,13 @@ class ManagedBrowserAuth:
         profile_dir: Path | None = None,
         timeout: float = 300,
         poll_interval: float = 1.0,
+        session_validator: SessionValidator | None = None,
     ):
         self._backend_impl = backend
         self._profile_path = profile_dir
         self._timeout = timeout
         self._poll_interval = poll_interval
+        self._validator_impl = session_validator
         self._state_lock = asyncio.Lock()
         self._browser_lock = asyncio.Lock()
         self._session_id: str | None = None
@@ -335,6 +409,11 @@ class ManagedBrowserAuth:
         if self._backend_impl is None:
             self._backend_impl = PlaywrightBrowserBackend()
         return self._backend_impl
+
+    def _resolve_validator(self) -> SessionValidator:
+        if self._validator_impl is None:
+            self._validator_impl = HttpSessionValidator()
+        return self._validator_impl
 
     def _snapshot(self) -> AuthSnapshot:
         return AuthSnapshot(
@@ -424,6 +503,12 @@ class ManagedBrowserAuth:
                 return CookieInfo(False, "", "missing", None, [])
 
             header = format_cookie_header(allowed)
+            try:
+                if not await self._resolve_validator().validate(header):
+                    return CookieInfo(False, "", "missing", None, [])
+            except Exception:
+                return CookieInfo(False, "", "missing", None, [])
+
             self._cached_header = header
             self._cached_names = [c["name"] for c in allowed]
             self._state = "authenticated"
@@ -514,11 +599,17 @@ class ManagedBrowserAuth:
 
                         if self._has_auth_cookie(cookies):
                             allowed = filter_lanhu_cookies(cookies)
-                            self._cached_header = format_cookie_header(allowed)
-                            self._cached_names = [c["name"] for c in allowed]
-                            self._state = "authenticated"
-                            self._message = None
-                            return
+                            header = format_cookie_header(allowed)
+                            try:
+                                if await self._resolve_validator().validate(header):
+                                    self._cached_header = header
+                                    self._cached_names = [c["name"] for c in allowed]
+                                    self._state = "authenticated"
+                                    self._message = None
+                                    return
+                            except Exception:
+                                pass  # validator error — keep polling
+                            # Stale/negative — keep polling
 
                         await asyncio.sleep(self._poll_interval)
                 finally:

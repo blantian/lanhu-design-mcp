@@ -8,6 +8,7 @@ import stat
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 import pytest
 
 from lanhu_design_mcp.config import CookieInfo
@@ -17,6 +18,7 @@ from lanhu_design_mcp.managed_auth import (
     AuthDependencyError,
     AuthProfileLockedError,
     AuthSnapshot,
+    HttpSessionValidator,
     ManagedBrowserAuth,
     PlaywrightBrowserBackend,
     UnsafeProfileError,
@@ -348,6 +350,24 @@ class FakeBackend:
 
 LANHU_SESSION = {"name": "session", "value": "abc123", "domain": ".lanhuapp.com"}
 LANHU_USER_TOKEN = {"name": "user_token", "value": "tok", "domain": "lanhuapp.com"}
+FAKE_VALID_HEADER = "session=abc123"
+
+
+class FakeSessionValidator:
+    """Injectable validator for deterministic tests."""
+
+    def __init__(self, valid=True, error=None):
+        self._valid = valid
+        self._error = error
+        self.call_count = 0
+        self.last_header = None
+
+    async def validate(self, cookie_header):
+        self.call_count += 1
+        self.last_header = cookie_header
+        if self._error:
+            raise self._error
+        return self._valid
 OTHER_COOKIE = {"name": "track", "value": "x", "domain": "example.com"}
 
 
@@ -358,6 +378,7 @@ def _auth(backend=None, profile_dir=None, **kw):
         backend = FakeBackend()
     kw.setdefault("poll_interval", 0.01)
     kw.setdefault("timeout", 1)
+    kw.setdefault("session_validator", FakeSessionValidator(valid=True))
     return ManagedBrowserAuth(backend=backend, profile_dir=profile_dir, **kw)
 
 
@@ -1147,3 +1168,231 @@ class TestCloseUnderLock:
         close_block.set()
         await resolve_task
         await auth.shutdown()
+
+
+# ===========================================================================
+# Session validation — stale cookie false-positive regression
+# ===========================================================================
+
+
+class TestSessionValidation:
+    """Prove stale cookies are rejected by the injected validator."""
+
+    @pytest.mark.asyncio
+    async def test_stale_cookie_rejected_by_visible_login(self, tmp_path):
+        validator = FakeSessionValidator(valid=False)
+        backend = FakeBackend(cookies=[LANHU_SESSION])
+        auth = ManagedBrowserAuth(
+            backend=backend, profile_dir=tmp_path / "profile",
+            poll_interval=0.01, timeout=0.1, session_validator=validator,
+        )
+        await auth.start_login()
+        await auth.wait_for_terminal_state()
+        result = await auth.status()
+        assert result["status"] != "authenticated"
+        assert result["authenticated"] is False
+        assert validator.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_valid_cookie_accepted_by_visible_login(self, tmp_path):
+        validator = FakeSessionValidator(valid=True)
+        backend = FakeBackend(cookies=[LANHU_SESSION])
+        auth = ManagedBrowserAuth(
+            backend=backend, profile_dir=tmp_path / "profile",
+            poll_interval=0.01, timeout=1, session_validator=validator,
+        )
+        await auth.start_login()
+        await auth.wait_for_terminal_state()
+        result = await auth.status()
+        assert result["status"] == "authenticated"
+
+    @pytest.mark.asyncio
+    async def test_stale_cookie_rejected_by_resolve(self, tmp_path):
+        profile = tmp_path / "profile"
+        ensure_owned_profile(profile)
+        validator = FakeSessionValidator(valid=False)
+        backend = FakeBackend(cookies=[LANHU_SESSION])
+        auth = ManagedBrowserAuth(
+            backend=backend, profile_dir=profile, session_validator=validator,
+        )
+        info = await auth.resolve_cookie()
+        assert info.source == "missing"
+
+    @pytest.mark.asyncio
+    async def test_valid_cookie_accepted_by_resolve(self, tmp_path):
+        profile = tmp_path / "profile"
+        ensure_owned_profile(profile)
+        validator = FakeSessionValidator(valid=True)
+        backend = FakeBackend(cookies=[LANHU_SESSION])
+        auth = ManagedBrowserAuth(
+            backend=backend, profile_dir=profile, session_validator=validator,
+        )
+        info = await auth.resolve_cookie()
+        assert info.source == "managed_browser"
+
+    @pytest.mark.asyncio
+    async def test_transient_validator_error_then_success(self, tmp_path):
+        call_count = [0]
+
+        class FlakyValidator:
+            async def validate(self, header):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    raise RuntimeError("transient network error")
+                return True
+
+        backend = FakeBackend(cookies=[LANHU_SESSION])
+        auth = ManagedBrowserAuth(
+            backend=backend, profile_dir=tmp_path / "profile",
+            poll_interval=0.01, timeout=1, session_validator=FlakyValidator(),
+        )
+        await auth.start_login()
+        await auth.wait_for_terminal_state()
+        result = await auth.status()
+        assert result["status"] == "authenticated"
+        assert call_count[0] >= 2
+
+    @pytest.mark.asyncio
+    async def test_validator_never_leaks_cookie_in_state(self, tmp_path):
+        validator = FakeSessionValidator(valid=False)
+        backend = FakeBackend(cookies=[LANHU_SESSION])
+        auth = ManagedBrowserAuth(
+            backend=backend, profile_dir=tmp_path / "profile",
+            poll_interval=0.01, timeout=0.1, session_validator=validator,
+        )
+        await auth.start_login()
+        await auth.wait_for_terminal_state()
+        result = await auth.status()
+        assert "abc123" not in str(result)
+        assert "session=" not in str(result)
+
+    @pytest.mark.asyncio
+    async def test_auth_status_probe_with_stale_cookie_is_missing(self, tmp_path):
+        profile = tmp_path / "profile"
+        ensure_owned_profile(profile)
+        validator = FakeSessionValidator(valid=False)
+        backend = FakeBackend(cookies=[LANHU_SESSION])
+        auth = ManagedBrowserAuth(
+            backend=backend, profile_dir=profile, session_validator=validator,
+        )
+        result = await auth.status(probe_profile=True)
+        assert result["status"] != "authenticated"
+        assert result["authenticated"] is False
+
+
+# ===========================================================================
+# Direct HttpSessionValidator response classification (no network)
+# ===========================================================================
+
+
+ACCOUNT_URL = "https://lanhuapp.com/api/account/user/detail"
+
+def _make_resp(status, json_body=None, text_body="", headers=None, history=None):
+    import json as _json
+    content = _json.dumps(json_body).encode() if json_body is not None else text_body.encode()
+    hdrs = dict(headers or {})
+    if json_body is not None:
+        hdrs.setdefault("content-type", "application/json")
+    return httpx.Response(status, headers=hdrs, content=content,
+                          request=httpx.Request("GET", ACCOUNT_URL),
+                          history=list(history or []))
+
+
+class TestHttpSessionValidator:
+    """Deterministic classification tests — no real HTTP.
+
+    Live contract: GET /api/account/user/detail
+      Authenticated → 200 {code: "00000", msg: ..., result: {...}}
+      Anonymous     → 401 {code: 30001}
+    """
+
+    @pytest.mark.asyncio
+    async def test_200_code_00000_is_true(self):
+        v = HttpSessionValidator()
+        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, {"code": "00000"}))):
+            assert await v.validate("s=x") is True
+
+    @pytest.mark.asyncio
+    async def test_200_code_not_00000_is_false(self):
+        v = HttpSessionValidator()
+        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, {"code": "00001"}))):
+            assert await v.validate("s=x") is False
+
+    @pytest.mark.asyncio
+    async def test_200_code_numeric_0_is_false(self):
+        v = HttpSessionValidator()
+        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, {"code": 0}))):
+            assert await v.validate("s=x") is False
+
+    @pytest.mark.asyncio
+    async def test_200_code_str_0_is_false(self):
+        v = HttpSessionValidator()
+        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, {"code": "0"}))):
+            assert await v.validate("s=x") is False
+
+    @pytest.mark.asyncio
+    async def test_200_missing_code_is_false(self):
+        v = HttpSessionValidator()
+        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, {"msg": "ok"}))):
+            assert await v.validate("s=x") is False
+
+    @pytest.mark.asyncio
+    async def test_401_is_false(self):
+        v = HttpSessionValidator()
+        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(401, {"code": 30001}))):
+            assert await v.validate("s=x") is False
+
+    @pytest.mark.asyncio
+    async def test_500_is_false(self):
+        v = HttpSessionValidator()
+        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(500, {"code": "00000"}))):
+            assert await v.validate("s=x") is False
+
+    @pytest.mark.asyncio
+    async def test_redirect_history_to_login_is_false(self):
+        redirect = httpx.Response(
+            302, headers={"Location": "https://lanhuapp.com/login"},
+            request=httpx.Request("GET", ACCOUNT_URL),
+        )
+        v = HttpSessionValidator()
+        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, {"code": "00000"}, history=[redirect]))):
+            assert await v.validate("s=x") is False
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_is_false(self):
+        v = HttpSessionValidator()
+        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, text_body="not json"))):
+            assert await v.validate("s=x") is False
+
+    @pytest.mark.asyncio
+    async def test_non_dict_json_is_false(self):
+        v = HttpSessionValidator()
+        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, json_body=[]))):
+            assert await v.validate("s=x") is False
+
+    @pytest.mark.asyncio
+    async def test_network_error_is_false(self):
+        v = HttpSessionValidator()
+        with patch.object(httpx.AsyncClient, "get", AsyncMock(side_effect=RuntimeError("network"))):
+            assert await v.validate("s=x") is False
+
+    @pytest.mark.asyncio
+    async def test_timeout_is_false(self):
+        v = HttpSessionValidator()
+        with patch.object(httpx.AsyncClient, "get", AsyncMock(side_effect=httpx.TimeoutException("timeout"))):
+            assert await v.validate("s=x") is False
+
+    @pytest.mark.asyncio
+    async def test_requests_account_endpoint_with_safe_headers(self):
+        v = HttpSessionValidator()
+        mock_get = AsyncMock(return_value=_make_resp(200, {"code": "00000"}))
+        with patch.object(httpx.AsyncClient, "get", mock_get):
+            await v.validate("s=fakevalue")
+        call_args = mock_get.call_args
+        url = call_args[0][0]
+        req_headers = call_args[1]["headers"]
+        assert url == ACCOUNT_URL
+        assert "Cookie" in req_headers
+        # Cookie value is present (it's the input) — we only verify the key
+        assert req_headers.get("Referer") == "https://lanhuapp.com/web/"
+        assert req_headers.get("request-from") == "web"
