@@ -33,15 +33,23 @@ def raise_for_lanhu_auth(response: httpx.Response) -> None:
     """
     if response.status_code in {401, 418}:
         raise LanhuAuthRequiredError()
+
+    # Redirect evidence: a redirect response whose Location targets login,
+    # OR a followed-request history whose Location targets login.
     location = response.headers.get("location", "")
     if response.is_redirect and "login" in location.lower():
         raise LanhuAuthRequiredError()
+
+    for h in response.history or ():
+        loc = h.headers.get("location", "")
+        if h.is_redirect and "login" in loc.lower():
+            raise LanhuAuthRequiredError()
 
 
 class LanhuClient:
     def __init__(self, settings: Settings):
         if not settings.lanhu_cookie:
-            raise LanhuAuthError("LANHU_COOKIE is required")
+            raise LanhuAuthRequiredError()
         self.settings = settings
         self.client = httpx.AsyncClient(
             timeout=settings.http_timeout,
@@ -77,6 +85,7 @@ class LanhuClient:
             params["team_id"] = ref.team_id
 
         response = await self.client.get(f"{BASE_URL}/api/project/images", params=params)
+        raise_for_lanhu_auth(response)
         response.raise_for_status()
         data = response.json()
         if data.get("code") != "00000":
@@ -113,6 +122,7 @@ class LanhuClient:
         if ref.team_id:
             params["team_id"] = ref.team_id
         response = await self.client.get(f"{BASE_URL}/api/project/multi_info", params=params)
+        raise_for_lanhu_auth(response)
         response.raise_for_status()
         data = response.json()
         if data.get("code") != "00000":
@@ -136,6 +146,7 @@ class LanhuClient:
         }
         async with httpx.AsyncClient(timeout=self.settings.http_timeout, headers=headers, follow_redirects=True) as dds:
             response = await dds.get(f"{DDS_BASE_URL}/api/dds/image/store_schema_revise", params={"version_id": version_id})
+            raise_for_lanhu_auth(response)
             response.raise_for_status()
             data = response.json()
             if data.get("code") != "00000":
@@ -156,6 +167,7 @@ class LanhuClient:
         if ref.team_id:
             params["team_id"] = ref.team_id
         response = await self.client.get(f"{BASE_URL}/api/project/image", params=params)
+        raise_for_lanhu_auth(response)
         response.raise_for_status()
         data = response.json()
         if data.get("code") != "00000":
