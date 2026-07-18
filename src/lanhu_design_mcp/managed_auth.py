@@ -8,6 +8,7 @@ Playwright or launch a browser.  The async state machine is in a later task.
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import stat as stat_mod
 from dataclasses import dataclass
@@ -69,7 +70,7 @@ def default_profile_dir(
 ) -> Path:
     """Return the platform-appropriate managed browser profile directory."""
     if system is None:
-        system = os.uname().sysname if hasattr(os, "uname") else os.name
+        system = platform.system()  # "Darwin", "Linux", "Windows", etc.
 
     if environ is None:
         environ = os.environ
@@ -93,15 +94,31 @@ def default_profile_dir(
 # ---------------------------------------------------------------------------
 
 
+def _normalize_domain(raw: str) -> str:
+    """Normalize a cookie domain for exact allowlist membership.
+
+    Strips whitespace, lowercases, removes one trailing DNS dot (but preserves
+    a leading dot for subdomain wildcard semantics).
+    """
+    domain = raw.strip().lower()
+    if domain.endswith(".") and not domain.startswith("."):
+        domain = domain[:-1]
+    elif domain.startswith(".") and domain.endswith("."):
+        domain = domain[:-1]
+    return domain
+
+
 def filter_lanhu_cookies(cookies: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Return only cookies whose normalized domain is in the Lanhu allowlist.
 
-    Uses exact set membership, never substring matching.
+    Uses exact set membership after normalization, never substring matching.
     """
     result: list[dict[str, Any]] = []
     for c in cookies:
         domain = str(c.get("domain") or "")
-        if domain in LANHU_DOMAINS:
+        if not domain.strip():
+            continue
+        if _normalize_domain(domain) in LANHU_DOMAINS:
             result.append(dict(c))
     return result
 
@@ -150,8 +167,8 @@ def ensure_owned_profile(profile_dir: Path) -> None:
     marker = profile_dir / PROFILE_MARKER
     marker.touch()
 
-    # POSIX owner-only
-    if hasattr(stat_mod, "S_IRWXU"):
+    # POSIX owner-only (skip on Windows)
+    if os.name != "nt":
         current = stat_mod.S_IMODE(profile_dir.stat().st_mode)
         if current != 0o700:
             os.chmod(profile_dir, 0o700)
@@ -160,9 +177,14 @@ def ensure_owned_profile(profile_dir: Path) -> None:
 def remove_owned_profile(profile_dir: Path) -> None:
     """Delete *profile_dir* only if it contains the package marker as a direct child.
 
-    Raises :exc:`UnsafeProfileError` when the marker is absent or nested deeper.
+    Resolves the target path and rejects symlinks.  Raises
+    :exc:`UnsafeProfileError` when the marker is absent, nested deeper, or the
+    path is a symlink.
     """
-    marker = profile_dir / PROFILE_MARKER
+    resolved = profile_dir.resolve()
+    if profile_dir.is_symlink():
+        raise UnsafeProfileError(f"Refusing to follow symlink for profile removal: {profile_dir}")
+    marker = resolved / PROFILE_MARKER
     if not marker.is_file():
         raise UnsafeProfileError(f"Profile directory is not owned by this package: {profile_dir}")
-    shutil.rmtree(profile_dir)
+    shutil.rmtree(resolved)
