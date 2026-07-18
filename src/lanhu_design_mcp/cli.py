@@ -42,13 +42,25 @@ def _auth_cmd(argv: Sequence[str]) -> int:
         return 2
 
     sub = argv[0]
+    rest = list(argv[1:])
+
     if sub == "login":
+        if rest:
+            print("Usage: lanhu-design-mcp auth login", file=sys.stderr)
+            return 2
         return _run_async(_auth_login())
     elif sub == "status":
+        if rest:
+            print("Usage: lanhu-design-mcp auth status", file=sys.stderr)
+            return 2
         return _run_async(_auth_status())
     elif sub == "logout":
-        confirm = "--confirm" in argv
-        return _run_async(_auth_logout(confirm))
+        confs = [a for a in rest if a == "--confirm"]
+        extras = [a for a in rest if a != "--confirm"]
+        if extras or len(confs) > 1:
+            print("Usage: lanhu-design-mcp auth logout [--confirm]", file=sys.stderr)
+            return 2
+        return _run_async(_auth_logout(bool(confs)))
     else:
         print(f"Unknown auth command: {sub}", file=sys.stderr)
         return 2
@@ -58,6 +70,10 @@ def _run_async(coro) -> int:
     try:
         return asyncio.run(coro)
     except Exception:
+        print(
+            json.dumps({"status": "failed", "message": "Authentication command failed."}),
+            file=sys.stderr,
+        )
         return 1
 
 
@@ -74,7 +90,7 @@ async def _auth_status() -> int:
     auth = get_managed_auth()
     result = await auth.status(probe_profile=True)
     print(json.dumps(result, ensure_ascii=False))
-    return 0 if result.get("status") in {"authenticated", "missing"} else 1
+    return 0 if result.get("authenticated") else 1
 
 
 async def _auth_logout(confirm: bool) -> int:

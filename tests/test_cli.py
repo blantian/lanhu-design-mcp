@@ -19,7 +19,7 @@ class TestServerDispatch:
 
 
 class TestAuthStatus:
-    def test_auth_status_prints_safe_json(self, capsys):
+    def test_auth_status_authenticated_returns_0(self, capsys):
         auth = AsyncMock()
         auth.status.return_value = {"status": "authenticated", "authenticated": True, "cookieNames": ["session"]}
 
@@ -32,6 +32,28 @@ class TestAuthStatus:
         data = json.loads(out)
         assert data["status"] == "authenticated"
         assert "session=" not in out
+
+    def test_auth_status_missing_returns_1(self, capsys):
+        auth = AsyncMock()
+        auth.status.return_value = {"status": "missing", "authenticated": False}
+
+        with patch("lanhu_design_mcp.cli.get_managed_auth", return_value=auth):
+            from lanhu_design_mcp import cli
+            ret = cli.main(["auth", "status"])
+            out = capsys.readouterr().out
+
+        assert ret == 1
+        assert "missing" in out
+
+    @pytest.mark.parametrize("status", ["expired", "cancelled", "timed_out", "dependency_missing", "profile_locked", "failed"])
+    def test_auth_status_non_ok_returns_1(self, status):
+        auth = AsyncMock()
+        auth.status.return_value = {"status": status, "authenticated": False}
+
+        with patch("lanhu_design_mcp.cli.get_managed_auth", return_value=auth):
+            from lanhu_design_mcp import cli
+            ret = cli.main(["auth", "status"])
+        assert ret == 1
 
 
 class TestAuthLogin:
@@ -89,16 +111,48 @@ class TestInvalidUsage:
         ret = cli.main(["invalid"])
         assert ret == 2
 
+    @pytest.mark.parametrize("args", [
+        ["auth", "login", "extra"],
+        ["auth", "status", "extra"],
+        ["auth", "logout", "--confirm", "--confirm"],
+        ["auth", "logout", "--unknown"],
+        ["auth", "logout", "--confirm", "extra"],
+    ])
+    def test_invalid_auth_args_return_2_and_no_auth_call(self, args):
+        auth = AsyncMock()
+        with patch("lanhu_design_mcp.cli.get_managed_auth", return_value=auth):
+            from lanhu_design_mcp import cli
+            ret = cli.main(args)
+        assert ret == 2
+        auth.start_login.assert_not_called()
+        auth.status.assert_not_called()
+        auth.logout.assert_not_called()
+
     def test_help_does_not_import_playwright(self):
-        # Remove playwright from sys.modules to prove it's not imported
         pw = sys.modules.pop("playwright", None)
         try:
             from lanhu_design_mcp import cli
             ret = cli.main(["--help"])
-            assert ret in {0, 2}
+            assert ret == 0
         finally:
             if pw:
                 sys.modules["playwright"] = pw
+
+
+class TestSafeExceptionOutput:
+    def test_exception_prints_safe_json_to_stderr(self, capsys):
+        auth = AsyncMock()
+        auth.status.side_effect = RuntimeError("secret-token=abc")
+
+        with patch("lanhu_design_mcp.cli.get_managed_auth", return_value=auth):
+            from lanhu_design_mcp import cli
+            ret = cli.main(["auth", "status"])
+
+        assert ret == 1
+        stderr = capsys.readouterr().err
+        assert "secret-token" not in stderr
+        assert "secret" not in stderr.lower()
+        assert "failed" in stderr.lower()
 
 
 class TestEntryPoint:
