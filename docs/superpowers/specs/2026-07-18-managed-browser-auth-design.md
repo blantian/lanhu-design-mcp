@@ -158,19 +158,21 @@ Authentication failure detection is based on the current Lanhu client's observed
 
 ## Packaging
 
-Playwright is an optional authentication dependency, exposed as the `auth` extra. Core server imports and legacy file/env authentication continue to work without it:
+> **Post-design amendment (2026-07-18):** The official MCP Registry PyPI package model cannot express extras. Therefore `playwright>=1.50.0` is a core package dependency. Its import remains lazy (only imported inside `PlaywrightBrowserBackend.open()`). No browser binary or Chromium is downloaded automatically; an installed system Google Chrome is required for managed login. The original optional-extra design was simplified to meet the Registry constraint.
+
+Core installation bundles the Playwright Python library lazily. Explicit file and environment-variable authentication work without any browser or Playwright import.
 
 ```text
-pip install lanhu-design-mcp[auth]
+pip install --upgrade lanhu-design-mcp
 ```
-
-Published MCP metadata and documentation present this extra as the recommended installation for automatic local login. They also retain manual `LANHU_COOKIE_FILE` and `LANHU_COOKIE` instructions for CI, headless machines, and users without Chrome.
 
 No installation step runs `playwright install`, modifies the user's browser, installs an extension, or launches Chrome.
 
+Manual `LANHU_COOKIE_FILE` and `LANHU_COOKIE` instructions remain available for CI, headless machines, and users without Chrome.
+
 ## Error Handling
 
-- Missing Python dependency: `dependency_missing`, including the exact `[auth]` installation command.
+- Missing Python dependency: `dependency_missing` with safe upgrade message (`pip install --upgrade lanhu-design-mcp`).
 - Missing system Chrome: `dependency_missing`, naming Chrome as the missing dependency and retaining manual-cookie guidance.
 - Profile locked: `profile_locked`; do not terminate another browser process.
 - User closes login window: `cancelled`.
@@ -189,7 +191,7 @@ CLI tests cover no-argument MCP startup compatibility and all three `auth` subco
 
 A manual smoke test is required on macOS, Linux, and Windows before declaring cross-platform release support:
 
-1. Install the package with `[auth]` on a machine with Chrome.
+1. Install the package on a machine with Chrome.
 2. Start login and authenticate to Lanhu.
 3. Confirm status becomes authenticated without exposing cookie values.
 4. Restart the MCP process and retrieve a real design without manual cookie import.
@@ -204,7 +206,7 @@ A manual smoke test is required on macOS, Linux, and Windows before declaring cr
 - Ordinary design calls never unexpectedly open a browser.
 - MCP and CLI outputs never expose credential values.
 - Missing dependencies, cancellation, timeout, profile locking, and expiry are actionable and retryable.
-- Core installation continues to start and use explicit cookie sources without Playwright.
+- Core installation starts and uses explicit cookie sources (Playwright import is lazy; explicit-source modes never trigger it).
 - The full automated test suite passes, and platform-specific release claims are limited to platforms that completed the manual smoke test.
 
 ## Deferred Work

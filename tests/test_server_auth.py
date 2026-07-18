@@ -107,6 +107,15 @@ class TestServerJson:
         assert data["version"] == "0.1.0"
         assert "$schema" in data
 
+    def test_description_length(self):
+        data = json.loads(Path("server.json").read_text())
+        assert len(data["description"]) <= 100, f"description too long: {len(data['description'])} chars"
+
+    def test_repository_source_is_github(self):
+        data = json.loads(Path("server.json").read_text())
+        assert data["repository"]["source"] == "github"
+        assert data["repository"]["url"].startswith("https://github.com")
+
     def test_package_identifier_and_version(self):
         data = json.loads(Path("server.json").read_text())
         pkg = data["packages"][0]

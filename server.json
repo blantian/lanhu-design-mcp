@@ -1,11 +1,11 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.buluesky/lanhu-design-mcp",
   "version": "0.1.0",
-  "description": "MCP server for reading Lanhu design specs and exporting UI restoration context with fine-grained sliced assets",
+  "description": "Read Lanhu design specs and export fine-grained UI assets with platform-adjusted units",
   "repository": {
     "url": "https://github.com/buluesky/lanhu-design-mcp",
-    "source": "pypi"
+    "source": "github"
   },
   "packages": [
     {
