@@ -227,7 +227,7 @@ class PlaywrightBrowserBackend:
             from playwright.async_api import async_playwright  # type: ignore[import-untyped]
         except ImportError as exc:
             raise AuthDependencyError(
-                "Install automatic login with: pip install 'lanhu-design-mcp[auth]'"
+                "Install automatic login with: pip install --upgrade lanhu-design-mcp"
             ) from exc
 
         pw = None
@@ -352,7 +352,7 @@ class ManagedBrowserAuth:
 
     @staticmethod
     def _safe_dependency_message() -> str:
-        return "Automatic login dependencies are not available. Install with: pip install 'lanhu-design-mcp[auth]'"
+        return "Automatic login dependencies are not available. Install with: pip install --upgrade lanhu-design-mcp"
 
     @staticmethod
     def _safe_profile_locked_message() -> str:

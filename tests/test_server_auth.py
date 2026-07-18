@@ -1,7 +1,10 @@
-"""Tests for MCP auth tools and health-check safety."""
+"""Tests for MCP auth tools, health-check safety, and server metadata."""
 
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -90,3 +93,76 @@ async def test_health_never_calls_legacy_or_network():
 
     auth.resolve_cookie.assert_not_called()
     auth.status_now.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# server.json contract tests
+# ---------------------------------------------------------------------------
+
+
+class TestServerJson:
+    def test_valid_json(self):
+        data = json.loads(Path("server.json").read_text())
+        assert data["name"] == "io.github.buluesky/lanhu-design-mcp"
+        assert data["version"] == "0.1.0"
+        assert "$schema" in data
+
+    def test_package_identifier_and_version(self):
+        data = json.loads(Path("server.json").read_text())
+        pkg = data["packages"][0]
+        assert pkg["identifier"] == "lanhu-design-mcp"
+        assert pkg["registryType"] == "pypi"
+        assert pkg["version"] == "0.1.0"
+        assert pkg["transport"]["type"] == "stdio"
+
+    def test_environment_variables_array(self):
+        data = json.loads(Path("server.json").read_text())
+        env_vars = data["packages"][0]["environmentVariables"]
+        names = {v["name"] for v in env_vars}
+        assert "LANHU_COOKIE" in names
+        assert "DDS_COOKIE" in names
+        assert "AUTO_BROWSER_COOKIES" in names
+
+    def test_lanhu_cookie_not_required(self):
+        data = json.loads(Path("server.json").read_text())
+        for v in data["packages"][0]["environmentVariables"]:
+            if v["name"] == "LANHU_COOKIE":
+                assert v["isRequired"] is False
+                assert v["isSecret"] is True
+
+    def test_auto_browser_cookies_default_false(self):
+        data = json.loads(Path("server.json").read_text())
+        for v in data["packages"][0]["environmentVariables"]:
+            if v["name"] == "AUTO_BROWSER_COOKIES":
+                assert v.get("default") == "false"
+
+    def test_no_unsupported_old_fields(self):
+        data = json.loads(Path("server.json").read_text())
+        assert "homepage" not in data
+        assert "license" not in data
+        assert "author" not in data
+        assert "keywords" not in data
+        assert "config" not in data
+        pkg = data["packages"][0]
+        assert "command" not in pkg
+        assert "type" not in pkg
+
+
+# ---------------------------------------------------------------------------
+# pyproject.toml packaging contract
+# ---------------------------------------------------------------------------
+
+
+class TestPyproject:
+    def test_playwright_is_core_dependency(self):
+        text = Path("pyproject.toml").read_text()
+        deps_section = text.split("[project.optional-dependencies]")[0]
+        assert "playwright" in deps_section
+
+    def test_no_auth_extra(self):
+        text = Path("pyproject.toml").read_text()
+        assert "auth = [" not in text
+
+    def test_cli_entry_point(self):
+        text = Path("pyproject.toml").read_text()
+        assert "lanhu-design-mcp = \"lanhu_design_mcp.cli:main\"" in text

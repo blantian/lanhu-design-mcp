@@ -83,7 +83,7 @@ async def lanhu_export_ui_context(
 
 @mcp.tool()
 async def lanhu_auth_login() -> dict:
-    """Open a dedicated Chrome profile for interactive Lanhu sign-in (Playwright auth extra required)."""
+    """Open a dedicated Chrome profile for interactive Lanhu sign-in."""
     return await get_managed_auth().start_login()
 
 
