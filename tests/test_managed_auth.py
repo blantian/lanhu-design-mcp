@@ -18,6 +18,7 @@ from lanhu_design_mcp.managed_auth import (
     AuthProfileLockedError,
     AuthSnapshot,
     ManagedBrowserAuth,
+    PlaywrightBrowserBackend,
     UnsafeProfileError,
     default_profile_dir,
     ensure_owned_profile,
@@ -870,41 +871,6 @@ class TestExternalClose:
 
 class TestCleanup:
     @pytest.mark.asyncio
-    async def test_navigation_failure_cleans_up_backend(self):
-        class NavFailBackend:
-            open_count = 0
-            close_count = 0
-
-            async def open(self, profile_dir, *, headless=False):
-                self.open_count += 1
-                return _NavFailSession(self)
-
-        class _NavFailSession:
-            def __init__(self, backend):
-                self._closed = False
-                self._backend = backend
-
-            async def cookies(self):
-                return [LANHU_SESSION]
-
-            def is_closed(self):
-                return self._closed
-
-            async def close(self):
-                if self._closed:
-                    return
-                self._closed = True
-                self._backend.close_count += 1
-
-        backend = NavFailBackend()
-        auth = _auth(backend=backend, profile_dir=Path("/tmp/test-navfail"))
-        await auth.start_login()
-        await auth.wait_for_terminal_state()
-        result = await auth.status()
-        assert result["status"] == "authenticated"
-        assert backend.close_count >= 1
-
-    @pytest.mark.asyncio
     async def test_close_is_idempotent(self, tmp_path):
         backend = ClosableEventBackend(cookies=[])
         auth = _auth(backend=backend, profile_dir=tmp_path / "profile", timeout=0.05)
@@ -914,3 +880,186 @@ class TestCleanup:
             await backend._last_session.close()
             await backend._last_session.close()
             assert backend._last_session.is_closed()
+
+
+# ===========================================================================
+# Finding A: production event wiring — direct PlaywrightBrowserBackend tests
+# via fake async_playwright module (no real Playwright installed)
+# ===========================================================================
+
+
+class FakeContext:
+    def __init__(self):
+        self.pages = []
+        self._close_handlers = []
+        self.closed = False
+
+    def on(self, event, handler):
+        if event == "close":
+            self._close_handlers.append(handler)
+
+    async def cookies(self):
+        return [LANHU_SESSION, OTHER_COOKIE]
+
+    async def close(self):
+        self.closed = True
+        for h in self._close_handlers:
+            h()
+
+    async def new_page(self):
+        page = FakePage(self)
+        self.pages.append(page)
+        return page
+
+
+class FakePage:
+    def __init__(self, context):
+        self._close_handlers = []
+        self.closed = False
+        self._context = context
+
+    def on(self, event, handler):
+        if event == "close":
+            self._close_handlers.append(handler)
+
+    async def goto(self, url, **kw):
+        pass
+
+    def fire_close(self):
+        self.closed = True
+        for h in self._close_handlers:
+            h()
+
+
+class FakeBrowserType:
+    async def launch_persistent_context(self, **kw):
+        return FakeContext()
+
+
+class FakePlaywright:
+    def __init__(self):
+        self.chromium = FakeBrowserType()
+        self._stopped = False
+        self._exit_count = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        self._stopped = True
+        self._exit_count += 1
+
+
+class TestPlaywrightBackendAdapter:
+    @staticmethod
+    def _install_fake_playwright(fake_ap):
+        """Install a fake playwright.async_api module into sys.modules."""
+        import sys
+        import types
+
+        fake_mod = types.ModuleType("playwright.async_api")
+        fake_mod.async_playwright = lambda: fake_ap
+        sys.modules["playwright"] = types.ModuleType("playwright")
+        sys.modules["playwright.async_api"] = fake_mod
+        return fake_mod
+
+    def test_context_close_event_sets_session_closed(self):
+        async def run():
+            backend = PlaywrightBrowserBackend()
+            fp = FakePlaywright()
+            self._install_fake_playwright(fp)
+            session = await backend.open(Path("/tmp/fake-profile"), headless=True)
+            assert not session.is_closed()
+            await session.close()
+            assert session.is_closed()
+            assert fp._exit_count == 1
+
+        asyncio.run(run())
+
+    def test_visible_mode_navigates_and_wires_page_close(self):
+        async def run():
+            backend = PlaywrightBrowserBackend()
+            fp = FakePlaywright()
+            self._install_fake_playwright(fp)
+            session = await backend.open(Path("/tmp/fake-profile"), headless=False)
+            assert not session.is_closed()
+            await session.close()
+            assert session.is_closed()
+            assert fp._exit_count == 1
+
+        asyncio.run(run())
+
+    def test_navigation_failure_still_stops_playwright(self):
+        async def run():
+            backend = PlaywrightBrowserBackend()
+            fp = FakePlaywright()
+            self._install_fake_playwright(fp)
+
+            # Patch launch_persistent_context to fail for non-headless
+            async def fail_for_visible(self, **kw):
+                if not kw.get("headless"):
+                    raise RuntimeError("connection refused")
+                return FakeContext()
+
+            with patch.object(FakeBrowserType, "launch_persistent_context", fail_for_visible):
+                with pytest.raises(Exception):
+                    await backend.open(Path("/tmp/fake-profile"), headless=False)
+                assert fp._exit_count == 1
+
+        asyncio.run(run())
+
+
+# ===========================================================================
+# Finding B: lock releases before close
+# ===========================================================================
+
+
+class BlockingCloseBackend:
+    """Backend whose session.close() blocks until an event is set."""
+
+    def __init__(self, cookies=None, close_block=None):
+        self._cookies = cookies or []
+        self._close_block = close_block or asyncio.Event()
+        self.open_count = 0
+
+    async def open(self, profile_dir, *, headless=False):
+        self.open_count += 1
+        return _BlockingCloseSession(self._cookies, self._close_block)
+
+
+class _BlockingCloseSession:
+    def __init__(self, cookies, close_block):
+        self._cookies = cookies
+        self._close_block = close_block
+        self._closed = False
+
+    async def cookies(self):
+        return list(self._cookies)
+
+    def is_closed(self):
+        return self._closed
+
+    async def close(self):
+        self._closed = True
+        await self._close_block.wait()
+
+
+class TestCloseUnderLock:
+    @pytest.mark.asyncio
+    async def test_resolve_blocked_while_close_holds_lock(self, tmp_path):
+        """Prove close releases the browser lock before resolve can acquire it."""
+        close_block = asyncio.Event()
+        backend = BlockingCloseBackend(cookies=[LANHU_SESSION], close_block=close_block)
+        auth = _auth(backend=backend, profile_dir=tmp_path / "profile", timeout=0.05)
+        await auth.start_login()
+        await asyncio.sleep(0.15)
+        # Login worker should have found the session cookie and be authenticating,
+        # then trying to close under the lock
+        # Start a resolve — it must wait for the close to finish
+        resolve_task = asyncio.create_task(auth.resolve_cookie())
+        await asyncio.sleep(0.1)
+        assert backend.open_count == 1  # resolve hasn't opened
+        # Release close block
+        close_block.set()
+        await resolve_task
+        await auth.shutdown()

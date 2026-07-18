@@ -232,6 +232,7 @@ class PlaywrightBrowserBackend:
 
         pw = None
         context = None
+        page = None
         try:
             pw = await async_playwright().__aenter__()
             context = await pw.chromium.launch_persistent_context(
@@ -255,13 +256,24 @@ class PlaywrightBrowserBackend:
                 page = pages[0] if pages else await context.new_page()
                 await page.goto("https://lanhuapp.com/", wait_until="domcontentloaded")
             except Exception:
-                await context.close()
+                try:
+                    await context.close()
+                except Exception:
+                    pass
                 await pw.__aexit__(None, None, None)
                 raise
 
         class _PlaywrightSession:
             def __init__(self_):
                 self_._closed = False
+                self_._driver_stopped = False
+
+                def on_close(*args: Any) -> None:
+                    self_._closed = True
+
+                context.on("close", on_close)
+                if page is not None:
+                    page.on("close", on_close)
 
             async def cookies(self_):
                 return await context.cookies()
@@ -270,7 +282,7 @@ class PlaywrightBrowserBackend:
                 return self_._closed
 
             async def close(self_):
-                if self_._closed:
+                if self_._closed and self_._driver_stopped:
                     return
                 self_._closed = True
                 try:
@@ -281,6 +293,7 @@ class PlaywrightBrowserBackend:
                     await pw.__aexit__(None, None, None)
                 except Exception:
                     pass
+                self_._driver_stopped = True
 
         return _PlaywrightSession()
 
@@ -477,36 +490,44 @@ class ManagedBrowserAuth:
             profile = self._resolve_profile()
             ensure_owned_profile(profile)
             async with self._browser_lock:
-                session = await self._resolve_backend().open(profile, headless=False)
-                self._state = "waiting_for_user"
-                deadline = asyncio.get_event_loop().time() + self._timeout
+                try:
+                    session = await self._resolve_backend().open(profile, headless=False)
+                    self._state = "waiting_for_user"
+                    deadline = asyncio.get_event_loop().time() + self._timeout
 
-                while True:
-                    remaining = deadline - asyncio.get_event_loop().time()
-                    if remaining <= 0:
-                        self._state = "timed_out"
-                        self._message = "Login timed out."
-                        return
+                    while True:
+                        remaining = deadline - asyncio.get_event_loop().time()
+                        if remaining <= 0:
+                            self._state = "timed_out"
+                            self._message = "Login timed out."
+                            return
 
-                    try:
-                        cookies = await asyncio.wait_for(session.cookies(), min(self._poll_interval, remaining))
-                    except asyncio.TimeoutError:
-                        continue
+                        try:
+                            cookies = await asyncio.wait_for(session.cookies(), min(self._poll_interval, remaining))
+                        except asyncio.TimeoutError:
+                            continue
 
-                    if session.is_closed():
-                        self._state = "cancelled"
-                        self._message = "Browser window was closed before login."
-                        return
+                        if session.is_closed():
+                            self._state = "cancelled"
+                            self._message = "Browser window was closed before login."
+                            return
 
-                    if self._has_auth_cookie(cookies):
-                        allowed = filter_lanhu_cookies(cookies)
-                        self._cached_header = format_cookie_header(allowed)
-                        self._cached_names = [c["name"] for c in allowed]
-                        self._state = "authenticated"
-                        self._message = None
-                        return
+                        if self._has_auth_cookie(cookies):
+                            allowed = filter_lanhu_cookies(cookies)
+                            self._cached_header = format_cookie_header(allowed)
+                            self._cached_names = [c["name"] for c in allowed]
+                            self._state = "authenticated"
+                            self._message = None
+                            return
 
-                    await asyncio.sleep(self._poll_interval)
+                        await asyncio.sleep(self._poll_interval)
+                finally:
+                    # Close session while still holding the browser lock
+                    if session is not None and not session.is_closed():
+                        try:
+                            await session.close()
+                        except Exception:
+                            pass
 
         except AuthDependencyError:
             self._state = "dependency_missing"
@@ -520,12 +541,6 @@ class ManagedBrowserAuth:
         except Exception:
             self._state = "failed"
             self._message = self._safe_failure_message()
-        finally:
-            if session is not None and not session.is_closed():
-                try:
-                    await session.close()
-                except Exception:
-                    pass
 
 
 # =============================================================================
