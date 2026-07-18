@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
 
-from .client import LanhuClient
-from .config import get_settings
+from .client import LanhuAuthRequiredError, LanhuClient
+from .config import get_settings, resolve_legacy_browser_cookie
 from .design_assets import assign_suggested_paths, extract_design_slices, sanitize_asset_name
 from .design_ir import summarize_schema
 from .platform_units import TargetPlatform
@@ -36,12 +37,45 @@ def resolve_design(designs: list[dict[str, Any]], ref: LanhuUrl, selector: str |
 
 
 class DesignService:
-    def __init__(self):
-        self.settings = get_settings()
+    def __init__(self, managed_auth=None):
+        self.settings = get_settings(include_browser_fallback=False)
+        self.managed_auth = managed_auth  # injected for tests; lazily imported for production
+
+    # ------------------------------------------------------------------
+    # async credential resolution
+    # ------------------------------------------------------------------
+
+    async def _resolve_settings(self):
+        if self.settings.lanhu_cookie:
+            return self.settings
+        if self.managed_auth is None:
+            from .managed_auth import get_managed_auth
+            self.managed_auth = get_managed_auth()
+        info = await self.managed_auth.resolve_cookie()
+        if not info.configured:
+            info = resolve_legacy_browser_cookie()
+        if not info.configured:
+            raise LanhuAuthRequiredError()
+        return get_settings(include_browser_fallback=False, lanhu_override=info)
+
+    @asynccontextmanager
+    async def _client(self):
+        settings = await self._resolve_settings()
+        try:
+            async with LanhuClient(settings) as client:
+                yield client
+        except LanhuAuthRequiredError:
+            if settings.lanhu_cookie_source == "managed_browser" and self.managed_auth is not None:
+                self.managed_auth.invalidate()
+            raise
+
+    # ------------------------------------------------------------------
+    # public operations — all route through _client()
+    # ------------------------------------------------------------------
 
     async def get_designs(self, url: str) -> dict[str, Any]:
         ref = parse_lanhu_url(url)
-        async with LanhuClient(self.settings) as client:
+        async with self._client() as client:
             return await client.get_designs(ref)
 
     async def analyze_design(
@@ -51,7 +85,7 @@ class DesignService:
         target_platform: TargetPlatform = "android",
     ) -> dict[str, Any]:
         ref = parse_lanhu_url(url)
-        async with LanhuClient(self.settings) as client:
+        async with self._client() as client:
             design_data = await client.get_designs(ref)
             design = resolve_design(design_data["designs"], ref, design_name_or_index)
             schema = await client.get_design_schema(ref, design["id"])
@@ -79,7 +113,7 @@ class DesignService:
     ) -> dict[str, Any]:
         ref = parse_lanhu_url(url)
         warnings: list[str] = []
-        async with LanhuClient(self.settings) as client:
+        async with self._client() as client:
             design_data = await client.get_designs(ref)
             design = resolve_design(design_data["designs"], ref, design_name_or_index)
             design_name = sanitize_asset_name(str(design.get("name") or "design"), "design")
@@ -97,6 +131,8 @@ class DesignService:
                 slice_scale = extracted["slice_scale"]
                 version = source_data.get("version")
                 status = "success"
+            except LanhuAuthRequiredError:
+                raise
             except (httpx.HTTPError, RuntimeError, ValueError, TypeError) as exc:
                 slices, slice_scale, version = [], None, None
                 warnings.append(f"Fine-grained assets unavailable: {exc}")

@@ -15,6 +15,29 @@ class LanhuAuthError(RuntimeError):
     pass
 
 
+class LanhuAuthRequiredError(LanhuAuthError):
+    """Structured authentication-required error with no secrets."""
+
+    def __init__(self) -> None:
+        super().__init__("Lanhu authentication is required; call lanhu_auth_login")
+
+    def to_dict(self) -> dict[str, str]:
+        return {"status": "auth_required", "nextAction": "lanhu_auth_login"}
+
+
+def raise_for_lanhu_auth(response: httpx.Response) -> None:
+    """Raise LanhuAuthRequiredError on strong authentication-failure evidence.
+
+    Does NOT classify a plain 403 as expired/missing auth — that stays a
+    normal HTTP error owned by the caller.
+    """
+    if response.status_code in {401, 418}:
+        raise LanhuAuthRequiredError()
+    location = response.headers.get("location", "")
+    if response.is_redirect and "login" in location.lower():
+        raise LanhuAuthRequiredError()
+
+
 class LanhuClient:
     def __init__(self, settings: Settings):
         if not settings.lanhu_cookie:
