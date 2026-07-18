@@ -708,7 +708,31 @@ class TestSafeMessages:
         backend = FakeBackend(open_side_effect=AuthDependencyError("install hint"))
         auth = _auth(backend=backend, profile_dir=profile)
         result = await auth.status(probe_profile=True)
-        assert result["status"] in {"dependency_missing", "profile_locked", "missing"}
+        assert result["status"] == "dependency_missing"
+        assert result["authenticated"] is False
+        msg = result.get("message", "")
+        assert "sentinel" not in msg
+
+    @pytest.mark.asyncio
+    async def test_probe_profile_exposes_profile_locked(self, tmp_path):
+        profile = tmp_path / "profile"
+        ensure_owned_profile(profile)
+        backend = FakeBackend(open_side_effect=AuthProfileLockedError("sentinel-locked-789"))
+        auth = _auth(backend=backend, profile_dir=profile)
+        result = await auth.status(probe_profile=True)
+        assert result["status"] == "profile_locked"
+        assert result["authenticated"] is False
+        msg = result.get("message", "")
+        assert "sentinel-locked-789" not in msg
+
+    @pytest.mark.asyncio
+    async def test_probe_generic_error_exposes_failed(self, tmp_path):
+        profile = tmp_path / "profile"
+        ensure_owned_profile(profile)
+        backend = FakeBackend(open_side_effect=RuntimeError("boom"))
+        auth = _auth(backend=backend, profile_dir=profile)
+        result = await auth.status(probe_profile=True)
+        assert result["status"] == "failed"
         assert result["authenticated"] is False
 
     @pytest.mark.asyncio
@@ -746,21 +770,147 @@ class TestBrowserLock:
         assert logout_task.done()
 
     @pytest.mark.asyncio
-    async def test_login_and_resolve_never_open_profile_concurrently(self, tmp_path):
+    async def test_resolve_blocked_while_visible_session_active(self, tmp_path):
+        """Visible session holds lock for its entire lifecycle; resolve must wait."""
         profile = tmp_path / "profile"
         ensure_owned_profile(profile)
-        start_block = asyncio.Event()
-        backend = BlockingBackend(cookies=[LANHU_SESSION], block_event=start_block)
-        auth = _auth(backend=backend, profile_dir=profile)
-        # Login blocks
-        login_task = asyncio.create_task(auth.start_login())
+        stay_open = asyncio.Event()  # keeps visible session alive
+        backend = BlockingBackend(cookies=[], block_event=stay_open)  # no auth cookie
+        auth = _auth(backend=backend, profile_dir=profile, timeout=10)
+        # Start visible login — opens backend then blocks on polling (no auth cookie)
+        await auth.start_login()
         await asyncio.sleep(0.15)
-        # Resolve tries — should not open concurrently
+        assert backend.open_count == 1
+        # Concurrent headless resolve must be blocked by the same lock
         resolve_task = asyncio.create_task(auth.resolve_cookie())
         await asyncio.sleep(0.1)
-        # Only login opened the backend
-        assert backend.open_count <= 1
-        start_block.set()
-        await login_task
+        assert backend.open_count == 1  # still 1 — resolve hasn't opened yet
+        assert not resolve_task.done()
+        # Release visible session → worker times out or finds no auth
+        stay_open.set()
+        await asyncio.sleep(0.2)
         await resolve_task
-        assert backend.open_count <= 2
+        await auth.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Fix 3/4: external close detection + cleanup exception safety
+# ---------------------------------------------------------------------------
+
+
+class FakeEvent:
+    """Simulates a Playwright event listener subscription."""
+
+    def __init__(self):
+        self._handlers = []
+
+    def add_listener(self, handler):
+        self._handlers.append(handler)
+
+    def fire(self):
+        for h in self._handlers:
+            h()
+
+
+class ClosableFakeSession(FakeSession):
+    """Session that fires on external close like real Playwright events."""
+
+    def __init__(self, *args, on_close=None, **kw):
+        super().__init__(*args, **kw)
+        self._on_close = on_close
+        self._close_event = FakeEvent()
+
+    def add_close_listener(self, handler):
+        self._close_event.add_listener(handler)
+
+    def simulate_external_close(self):
+        self._closed = True
+        self._close_event.fire()
+        if self._on_close:
+            self._on_close()
+
+    async def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._close_event.fire()
+        except Exception:
+            pass
+
+
+class ClosableEventBackend:
+    """Backend producing sessions that support external close simulation."""
+
+    def __init__(self, cookies=None):
+        self._cookies = cookies or []
+        self.open_count = 0
+        self._last_session = None
+
+    async def open(self, profile_dir, *, headless=False):
+        self.open_count += 1
+        session = ClosableFakeSession(self._cookies)
+        self._last_session = session
+        return session
+
+
+class TestExternalClose:
+    @pytest.mark.asyncio
+    async def test_context_close_event_sets_session_closed(self, tmp_path):
+        backend = ClosableEventBackend(cookies=[])
+        auth = _auth(backend=backend, profile_dir=tmp_path / "profile")
+        await auth.start_login()
+        await asyncio.sleep(0.1)
+        assert backend._last_session is not None
+        assert not backend._last_session.is_closed()
+        backend._last_session.simulate_external_close()
+        await asyncio.sleep(0.15)
+        assert backend._last_session.is_closed()
+
+
+class TestCleanup:
+    @pytest.mark.asyncio
+    async def test_navigation_failure_cleans_up_backend(self):
+        class NavFailBackend:
+            open_count = 0
+            close_count = 0
+
+            async def open(self, profile_dir, *, headless=False):
+                self.open_count += 1
+                return _NavFailSession(self)
+
+        class _NavFailSession:
+            def __init__(self, backend):
+                self._closed = False
+                self._backend = backend
+
+            async def cookies(self):
+                return [LANHU_SESSION]
+
+            def is_closed(self):
+                return self._closed
+
+            async def close(self):
+                if self._closed:
+                    return
+                self._closed = True
+                self._backend.close_count += 1
+
+        backend = NavFailBackend()
+        auth = _auth(backend=backend, profile_dir=Path("/tmp/test-navfail"))
+        await auth.start_login()
+        await auth.wait_for_terminal_state()
+        result = await auth.status()
+        assert result["status"] == "authenticated"
+        assert backend.close_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_close_is_idempotent(self, tmp_path):
+        backend = ClosableEventBackend(cookies=[])
+        auth = _auth(backend=backend, profile_dir=tmp_path / "profile", timeout=0.05)
+        await auth.start_login()
+        await auth.wait_for_terminal_state()
+        if backend._last_session:
+            await backend._last_session.close()
+            await backend._last_session.close()
+            assert backend._last_session.is_closed()

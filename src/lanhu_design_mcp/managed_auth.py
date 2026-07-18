@@ -394,10 +394,16 @@ class ManagedBrowserAuth:
                 finally:
                     await session.close()
             except AuthDependencyError:
+                self._state = "dependency_missing"
+                self._message = self._safe_dependency_message()
                 return CookieInfo(False, "", "missing", None, [])
             except AuthProfileLockedError:
+                self._state = "profile_locked"
+                self._message = self._safe_profile_locked_message()
                 return CookieInfo(False, "", "missing", None, [])
             except Exception:
+                self._state = "failed"
+                self._message = self._safe_failure_message()
                 return CookieInfo(False, "", "missing", None, [])
 
             allowed = filter_lanhu_cookies(cookies)
@@ -408,6 +414,7 @@ class ManagedBrowserAuth:
             self._cached_header = header
             self._cached_names = [c["name"] for c in allowed]
             self._state = "authenticated"
+            self._message = None
             return CookieInfo(True, header, "managed_browser", None, list(self._cached_names))
 
     def invalidate(self) -> None:
@@ -471,35 +478,35 @@ class ManagedBrowserAuth:
             ensure_owned_profile(profile)
             async with self._browser_lock:
                 session = await self._resolve_backend().open(profile, headless=False)
-            self._state = "waiting_for_user"
-            deadline = asyncio.get_event_loop().time() + self._timeout
+                self._state = "waiting_for_user"
+                deadline = asyncio.get_event_loop().time() + self._timeout
 
-            while True:
-                remaining = deadline - asyncio.get_event_loop().time()
-                if remaining <= 0:
-                    self._state = "timed_out"
-                    self._message = "Login timed out."
-                    return
+                while True:
+                    remaining = deadline - asyncio.get_event_loop().time()
+                    if remaining <= 0:
+                        self._state = "timed_out"
+                        self._message = "Login timed out."
+                        return
 
-                try:
-                    cookies = await asyncio.wait_for(session.cookies(), min(self._poll_interval, remaining))
-                except asyncio.TimeoutError:
-                    continue
+                    try:
+                        cookies = await asyncio.wait_for(session.cookies(), min(self._poll_interval, remaining))
+                    except asyncio.TimeoutError:
+                        continue
 
-                if session.is_closed():
-                    self._state = "cancelled"
-                    self._message = "Browser window was closed before login."
-                    return
+                    if session.is_closed():
+                        self._state = "cancelled"
+                        self._message = "Browser window was closed before login."
+                        return
 
-                if self._has_auth_cookie(cookies):
-                    allowed = filter_lanhu_cookies(cookies)
-                    self._cached_header = format_cookie_header(allowed)
-                    self._cached_names = [c["name"] for c in allowed]
-                    self._state = "authenticated"
-                    self._message = None
-                    return
+                    if self._has_auth_cookie(cookies):
+                        allowed = filter_lanhu_cookies(cookies)
+                        self._cached_header = format_cookie_header(allowed)
+                        self._cached_names = [c["name"] for c in allowed]
+                        self._state = "authenticated"
+                        self._message = None
+                        return
 
-                await asyncio.sleep(self._poll_interval)
+                    await asyncio.sleep(self._poll_interval)
 
         except AuthDependencyError:
             self._state = "dependency_missing"
