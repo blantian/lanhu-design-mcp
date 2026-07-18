@@ -9,8 +9,10 @@ from lanhu_design_mcp.config import (
     cookie_names_from_header,
     default_lanhu_cookie_file,
     get_settings,
+    resolve_configured_lanhu_cookie,
     resolve_dds_cookie,
     resolve_lanhu_cookie,
+    resolve_legacy_browser_cookie,
 )
 
 
@@ -204,3 +206,136 @@ class TestHealthPayloadNoValues:
             assert settings.lanhu_cookie == "session=topsecret"
             assert "topsecret" not in str(settings.lanhu_cookie_names)
             assert settings.lanhu_cookie_names == ["session"]
+
+
+# ---------------------------------------------------------------------------
+# Task 1 (managed auth): split explicit and legacy cookie resolution
+# ---------------------------------------------------------------------------
+
+
+class TestConfiguredResolver:
+    def test_configured_resolver_does_not_touch_browser(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LANHU_COOKIE", raising=False)
+        monkeypatch.delenv("LANHU_COOKIE_FILE", raising=False)
+        monkeypatch.setenv("AUTO_BROWSER_COOKIES", "true")
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch("lanhu_design_mcp.config.resolve_legacy_browser_cookie") as browser,
+        ):
+            # Even with AUTO_BROWSER_COOKIES=true, the configured resolver
+            # must not invoke the browser fallback.
+            info = resolve_configured_lanhu_cookie()
+        assert info.source == "missing"
+        browser.assert_not_called()
+
+    def test_configured_resolver_file_beats_env(self, tmp_path, monkeypatch):
+        cookie_file = tmp_path / "cookies.txt"
+        cookie_file.write_text("session=fromfile; tfstk=ff")
+        monkeypatch.setenv("LANHU_COOKIE_FILE", str(cookie_file))
+        monkeypatch.setenv("LANHU_COOKIE", "session=fromenv")
+        info = resolve_configured_lanhu_cookie()
+        assert info.source == "file"
+        assert info.cookie_file == cookie_file
+        assert info.cookie == "session=fromfile; tfstk=ff"
+
+    def test_configured_resolver_env_only(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LANHU_COOKIE_FILE", raising=False)
+        monkeypatch.setenv("LANHU_COOKIE", "session=envval")
+        with patch.object(Path, "home", return_value=tmp_path):
+            info = resolve_configured_lanhu_cookie()
+        assert info.source == "env"
+        assert info.cookie == "session=envval"
+
+
+class TestLegacyBrowserResolver:
+    def test_legacy_browser_skips_when_env_not_set(self, monkeypatch):
+        monkeypatch.delenv("AUTO_BROWSER_COOKIES", raising=False)
+        info = resolve_legacy_browser_cookie()
+        assert info.source == "missing"
+        assert info.cookie == ""
+
+    def test_legacy_browser_skips_when_set_to_false(self, monkeypatch):
+        monkeypatch.setenv("AUTO_BROWSER_COOKIES", "false")
+        info = resolve_legacy_browser_cookie()
+        assert info.source == "missing"
+
+    @patch("lanhu_design_mcp.browser_cookies.get_lanhu_cookies", return_value="session=mock; tfstk=ff")
+    def test_legacy_browser_returns_browser_info(self, mock_browser, monkeypatch):
+        monkeypatch.setenv("AUTO_BROWSER_COOKIES", "true")
+        info = resolve_legacy_browser_cookie()
+        assert info.source == "browser"
+        assert info.configured is True
+        assert info.cookie == "session=mock; tfstk=ff"
+        assert info.cookie_names == ["session", "tfstk"]
+
+    @patch("lanhu_design_mcp.browser_cookies.get_lanhu_cookies", side_effect=OSError("locked"))
+    def test_legacy_browser_returns_missing_on_error(self, mock_browser, monkeypatch):
+        monkeypatch.setenv("AUTO_BROWSER_COOKIES", "true")
+        info = resolve_legacy_browser_cookie()
+        assert info.source == "missing"
+        assert info.configured is False
+
+
+class TestResolveLanhuCookieCompatibility:
+    """Backward-compatibility: resolve_lanhu_cookie delegates to the new resolvers."""
+
+    def test_configured_beats_legacy(self, tmp_path, monkeypatch):
+        cookie_file = tmp_path / "cfg.txt"
+        cookie_file.write_text("session=cfg")
+        monkeypatch.setenv("LANHU_COOKIE_FILE", str(cookie_file))
+        monkeypatch.setenv("LANHU_COOKIE", "session=env")
+        monkeypatch.setenv("AUTO_BROWSER_COOKIES", "true")
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch("lanhu_design_mcp.browser_cookies.get_lanhu_cookies", return_value="session=db"),
+        ):
+            info = resolve_lanhu_cookie()
+        assert info.source == "file"
+        assert info.cookie == "session=cfg"
+
+
+class TestGetSettingsWithManagedBrowser:
+    def test_settings_accept_managed_browser_override(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("DDS_COOKIE", raising=False)
+        monkeypatch.delenv("DDS_COOKIE_FILE", raising=False)
+        info = CookieInfo(True, "session=fake", "managed_browser", None, ["session"])
+        with patch.object(Path, "home", return_value=tmp_path):
+            settings = get_settings(include_browser_fallback=False, lanhu_override=info)
+        assert settings.lanhu_cookie_source == "managed_browser"
+        assert settings.lanhu_cookie == "session=fake"
+        assert settings.dds_cookie == "session=fake"
+        assert settings.dds_cookie_source == "lanhu"
+
+    def test_settings_include_browser_fallback_controls_legacy(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LANHU_COOKIE", raising=False)
+        monkeypatch.delenv("LANHU_COOKIE_FILE", raising=False)
+        monkeypatch.setenv("AUTO_BROWSER_COOKIES", "true")
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch("lanhu_design_mcp.browser_cookies.get_lanhu_cookies", return_value="session=dbval"),
+        ):
+            settings_false = get_settings(include_browser_fallback=False)
+            settings_true = get_settings(include_browser_fallback=True)
+        assert settings_false.lanhu_cookie_source == "missing"
+        assert settings_true.lanhu_cookie_source == "browser"
+
+    def test_settings_lanhu_override_beats_all(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("LANHU_COOKIE", "session=env")
+        monkeypatch.setenv("AUTO_BROWSER_COOKIES", "true")
+        info = CookieInfo(True, "session=override", "managed_browser", None, ["session"])
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch("lanhu_design_mcp.browser_cookies.get_lanhu_cookies", return_value="session=db"),
+        ):
+            settings = get_settings(include_browser_fallback=True, lanhu_override=info)
+        assert settings.lanhu_cookie_source == "managed_browser"
+        assert settings.lanhu_cookie == "session=override"
+
+    def test_get_settings_without_args_preserves_full_backward_compat(self, tmp_path, monkeypatch):
+        """No-arg get_settings() must still resolve through legacy fallback."""
+        monkeypatch.setenv("LANHU_COOKIE", "session=backward")
+        monkeypatch.setenv("AUTO_BROWSER_COOKIES", "false")
+        with patch.object(Path, "home", return_value=tmp_path):
+            settings = get_settings()
+        assert settings.lanhu_cookie_source == "env"
+        assert settings.lanhu_cookie == "session=backward"
