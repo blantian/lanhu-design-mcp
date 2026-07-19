@@ -1,0 +1,83 @@
+name: Publish Python distribution to PyPI
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-distributions:
+    name: Build release distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Verify release identity and versions
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import tomllib
+          from pathlib import Path
+
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          server = json.loads(Path("server.json").read_text(encoding="utf-8"))
+          project_version = project["project"]["version"]
+          expected_tag = f"v{project_version}"
+
+          assert project["project"]["name"] == "lanhu-design-mcp"
+          assert os.environ["RELEASE_TAG"] == expected_tag
+          assert server["name"] == "io.github.blantian/lanhu-design-mcp"
+          assert server["version"] == project_version
+          assert server["packages"][0]["identifier"] == "lanhu-design-mcp"
+          assert server["packages"][0]["version"] == project_version
+          PY
+
+      - name: Install build tooling
+        run: python -m pip install --disable-pip-version-check build twine
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Check distribution metadata
+        run: python -m twine check dist/*
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: python-package-distributions
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-to-pypi:
+    name: Publish distributions to PyPI
+    needs: build-distributions
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/lanhu-design-mcp
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
