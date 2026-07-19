@@ -42,27 +42,6 @@ class TestDefaultProfileDir:
         expected = tmp_path / "Library" / "Application Support" / "lanhu-design-mcp" / "browser-profile"
         assert path == expected
 
-    def test_linux_uses_xdg_data_home(self, tmp_path):
-        xdg = tmp_path / ".local" / "share"
-        path = default_profile_dir("Linux", {"XDG_DATA_HOME": str(xdg)})
-        assert path == xdg / "lanhu-design-mcp" / "browser-profile"
-
-    def test_linux_falls_back_to_home_local_share(self, tmp_path):
-        path = default_profile_dir("Linux", {"HOME": str(tmp_path)})
-        assert path == tmp_path / ".local" / "share" / "lanhu-design-mcp" / "browser-profile"
-
-    def test_windows_uses_localappdata(self, tmp_path):
-        appdata = tmp_path / "AppData" / "Local"
-        path = default_profile_dir("Windows", {"LOCALAPPDATA": str(appdata)})
-        assert path == appdata / "lanhu-design-mcp" / "browser-profile"
-
-    def test_automatic_detection_uses_platform_system(self, tmp_path):
-        """When system=None, platform.system() is used for detection."""
-        appdata = tmp_path / "AppData" / "Local"
-        with patch("lanhu_design_mcp.managed_auth.platform.system", return_value="Windows"):
-            path = default_profile_dir(environ={"LOCALAPPDATA": str(appdata), "HOME": str(tmp_path)})
-        assert path == appdata / "lanhu-design-mcp" / "browser-profile"
-
     def test_automatic_detection_darwin(self, tmp_path):
         with patch("lanhu_design_mcp.managed_auth.platform.system", return_value="Darwin"):
             path = default_profile_dir(environ={"HOME": str(tmp_path)})
@@ -1396,3 +1375,42 @@ class TestHttpSessionValidator:
         # Cookie value is present (it's the input) — we only verify the key
         assert req_headers.get("Referer") == "https://lanhuapp.com/web/"
         assert req_headers.get("request-from") == "web"
+
+
+# ===========================================================================
+# macOS-only boundary
+# ===========================================================================
+
+
+from lanhu_design_mcp.managed_auth import UnsupportedPlatformError
+
+
+class TestMacOSOnlyBoundary:
+    def test_default_profile_dir_rejects_non_darwin(self):
+        with pytest.raises(UnsupportedPlatformError):
+            default_profile_dir(system="Linux", environ={"HOME": "/tmp/user"})
+
+    def test_default_profile_dir_uses_macos_application_support(self):
+        path = default_profile_dir(system="Darwin", environ={"HOME": "/Users/tester"})
+        assert path == Path(
+            "/Users/tester/Library/Application Support/lanhu-design-mcp/browser-profile"
+        )
+
+    @pytest.mark.asyncio
+    async def test_start_login_rejects_non_darwin_without_opening_browser(self):
+        backend = AsyncMock()
+        auth = ManagedBrowserAuth(backend=backend, system="Linux")
+        result = await auth.start_login()
+        assert result["status"] == "unsupported_platform"
+        assert result["authenticated"] is False
+        backend.open.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_resolve_cookie_rejects_non_darwin_without_profile_access(self, tmp_path):
+        backend = AsyncMock()
+        auth = ManagedBrowserAuth(backend=backend, profile_dir=tmp_path / "profile", system="Windows")
+        result = await auth.resolve_cookie()
+        assert result.configured is False
+        assert auth.status_now()["status"] == "unsupported_platform"
+        assert not (tmp_path / "profile").exists()
+        backend.open.assert_not_called()

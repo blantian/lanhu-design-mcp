@@ -24,6 +24,7 @@ AuthStatus = Literal[
     "timed_out",
     "dependency_missing",
     "profile_locked",
+    "unsupported_platform",
     "failed",
 ]
 
@@ -34,6 +35,10 @@ PROFILE_MARKER = ".lanhu-design-mcp-profile"
 
 class UnsafeProfileError(RuntimeError):
     """Raised when a profile operation targets an unsafe directory."""
+
+
+class UnsupportedPlatformError(RuntimeError):
+    """The current operating system is not formally supported."""
 
 
 @dataclass(frozen=True)
@@ -67,24 +72,19 @@ def default_profile_dir(
     system: str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> Path:
-    """Return the platform-appropriate managed browser profile directory."""
-    if system is None:
-        system = platform.system()  # "Darwin", "Linux", "Windows", etc.
+    """Return the macOS managed browser profile directory.
 
+    Raises :exc:`UnsupportedPlatformError` on any non-Darwin system.
+    """
+    if system is None:
+        system = platform.system()
+    if system != "Darwin":
+        raise UnsupportedPlatformError(
+            "Managed Lanhu login is supported on macOS only."
+        )
     if environ is None:
         environ = os.environ
-
-    if system == "Darwin":
-        base = Path(environ.get("HOME", Path.home())) / "Library" / "Application Support"
-    elif system == "Windows":
-        base = Path(environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
-    else:  # Linux / other POSIX
-        xdg = environ.get("XDG_DATA_HOME")
-        if xdg:
-            base = Path(xdg)
-        else:
-            base = Path(environ.get("HOME", Path.home())) / ".local" / "share"
-
+    base = Path(environ.get("HOME", Path.home())) / "Library" / "Application Support"
     return base / "lanhu-design-mcp" / "browser-profile"
 
 
@@ -381,12 +381,14 @@ class ManagedBrowserAuth:
         timeout: float = 300,
         poll_interval: float = 1.0,
         session_validator: SessionValidator | None = None,
+        system: str | None = None,
     ):
         self._backend_impl = backend
         self._profile_path = profile_dir
         self._timeout = timeout
         self._poll_interval = poll_interval
         self._validator_impl = session_validator
+        self._system = system
         self._state_lock = asyncio.Lock()
         self._browser_lock = asyncio.Lock()
         self._session_id: str | None = None
@@ -399,6 +401,20 @@ class ManagedBrowserAuth:
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
+
+    def _is_supported_platform(self) -> bool:
+        return (self._system or platform.system()) == "Darwin"
+
+    @staticmethod
+    def _safe_unsupported_platform_message() -> str:
+        return "Managed Lanhu login is supported on macOS only."
+
+    def _reject_unsupported_platform(self) -> bool:
+        if self._is_supported_platform():
+            return False
+        self._state = "unsupported_platform"
+        self._message = self._safe_unsupported_platform_message()
+        return True
 
     def _resolve_profile(self) -> Path:
         if self._profile_path is None:
@@ -456,6 +472,8 @@ class ManagedBrowserAuth:
         return self._snapshot().to_dict()
 
     async def start_login(self) -> dict[str, Any]:
+        if self._reject_unsupported_platform():
+            return self._snapshot().to_dict()
         async with self._state_lock:
             if self._task and not self._task.done():
                 return self._snapshot().to_dict()
@@ -467,6 +485,8 @@ class ManagedBrowserAuth:
             return self._snapshot().to_dict()
 
     async def resolve_cookie(self) -> CookieInfo:
+        if self._reject_unsupported_platform():
+            return CookieInfo(False, "", "missing", None, [])
         if self._cached_header:
             return CookieInfo(True, self._cached_header, "managed_browser", None, list(self._cached_names))
 
