@@ -37,7 +37,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from lanhu_design_mcp.url_parser import LanhuUrl
+from lanhu_design_mcp.design.url import LanhuUrl
 
 
 def settings() -> Settings:
@@ -168,7 +168,7 @@ class TestRedirectAuthDetection:
 class TestDesignServiceAuthIntegration:
     @pytest.mark.asyncio
     async def test_managed_cookie_418_triggers_invalidation(self, tmp_path):
-        from lanhu_design_mcp.design_service import DesignService
+        from lanhu_design_mcp.design.service import DesignService
 
         auth = AsyncMock()
         auth.resolve_cookie.return_value = CookieInfo(True, "session=managed", "managed_browser", ["session"])
@@ -176,7 +176,7 @@ class TestDesignServiceAuthIntegration:
 
         service = DesignService(managed_auth=auth)
 
-        with patch("lanhu_design_mcp.design_service.LanhuClient") as mock_client_cls:
+        with patch("lanhu_design_mcp.design.service.LanhuClient") as mock_client_cls:
             mock_client_cls.side_effect = LanhuAuthRequiredError()
             with pytest.raises(LanhuAuthRequiredError):
                 await service.get_designs("https://lanhuapp.com/web/#/item/project/stage?pid=p1")

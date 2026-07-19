@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from .auth.models import Settings
-from .url_parser import LanhuUrl
+
+if TYPE_CHECKING:
+    from .design.url import LanhuUrl
 
 BASE_URL = "https://lanhuapp.com"
 DDS_BASE_URL = "https://dds.lanhuapp.com"

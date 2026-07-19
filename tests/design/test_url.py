@@ -1,4 +1,4 @@
-from lanhu_design_mcp.url_parser import parse_lanhu_url
+from lanhu_design_mcp.design.url import parse_lanhu_url
 
 
 def test_parse_stage_url():

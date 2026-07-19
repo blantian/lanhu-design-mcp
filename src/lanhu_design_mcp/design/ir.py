@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .platform_units import TargetPlatform, convert_rect, get_platform_spec
+from .units import TargetPlatform, convert_rect, get_platform_spec
 
 
 @dataclass

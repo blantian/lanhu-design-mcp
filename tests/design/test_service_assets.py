@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from lanhu_design_mcp.auth.models import CookieInfo
-from lanhu_design_mcp.design_service import DesignService
+from lanhu_design_mcp.design.service import DesignService
 
 URL = "https://lanhuapp.com/web/#/item/project/stage?pid=p1&image_id=i1"
 DESIGNS = {"status": "success", "project_id": "p1", "project_name": "Demo", "designs": [
@@ -32,7 +32,7 @@ async def test_get_design_assets_combines_full_image_and_slices(monkeypatch):
     ma = AsyncMock()
     ma.resolve_cookie.return_value = CookieInfo(True, "s=m", "managed_browser", ["session"])
     with (
-        patch("lanhu_design_mcp.design_service.LanhuClient", return_value=context),
+        patch("lanhu_design_mcp.design.service.LanhuClient", return_value=context),
     ):
         result = await DesignService(managed_auth=ma).get_design_assets(URL)
     assert result["status"] == "success"
@@ -53,7 +53,7 @@ async def test_get_design_assets_returns_partial_success_when_source_fails():
     context.__aexit__.return_value = None
     ma = AsyncMock()
     ma.resolve_cookie.return_value = CookieInfo(True, "s=m", "managed_browser", ["session"])
-    with patch("lanhu_design_mcp.design_service.LanhuClient", return_value=context):
+    with patch("lanhu_design_mcp.design.service.LanhuClient", return_value=context):
         result = await DesignService(managed_auth=ma).get_design_assets(URL)
     assert result["status"] == "partial_success"
     assert result["total_assets"] == 1
@@ -73,7 +73,7 @@ async def test_get_design_assets_succeeds_when_design_has_no_slices():
     context.__aexit__.return_value = None
     ma = AsyncMock()
     ma.resolve_cookie.return_value = CookieInfo(True, "s=m", "managed_browser", ["session"])
-    with patch("lanhu_design_mcp.design_service.LanhuClient", return_value=context):
+    with patch("lanhu_design_mcp.design.service.LanhuClient", return_value=context):
         result = await DesignService(managed_auth=ma).get_design_assets(URL)
     assert result["status"] == "success"
     assert result["total_assets"] == 1
@@ -97,7 +97,7 @@ async def test_get_design_assets_avoids_full_image_slice_path_collision():
     context.__aexit__.return_value = None
     ma = AsyncMock()
     ma.resolve_cookie.return_value = CookieInfo(True, "s=m", "managed_browser", ["session"])
-    with patch("lanhu_design_mcp.design_service.LanhuClient", return_value=context):
+    with patch("lanhu_design_mcp.design.service.LanhuClient", return_value=context):
         result = await DesignService(managed_auth=ma).get_design_assets(URL)
     assert result["assets"][0]["suggested_local_path"].endswith("/Home.png")
     assert result["assets"][1]["suggested_local_path"].endswith("/Home_2.png")

@@ -1,4 +1,4 @@
-from lanhu_design_mcp.design_ir import summarize_schema
+from lanhu_design_mcp.design.ir import summarize_schema
 
 
 def test_summarize_schema_converts_page_and_node_to_android_dp():

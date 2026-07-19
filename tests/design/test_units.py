@@ -1,4 +1,4 @@
-from lanhu_design_mcp.platform_units import convert_rect, convert_value, format_value, get_platform_spec
+from lanhu_design_mcp.design.units import convert_rect, convert_value, format_value, get_platform_spec
 
 
 def test_android_matches_verified_lanhu_rule():

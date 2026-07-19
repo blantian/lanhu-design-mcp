@@ -1,10 +1,10 @@
-"""Tests for lanhu_design_mcp.design_assets."""
+"""Tests for lanhu_design_mcp.design.assets."""
 
 from __future__ import annotations
 
 import importlib.util
 
-from lanhu_design_mcp.design_assets import (
+from lanhu_design_mcp.design.assets import (
     assign_suggested_paths,
     build_ps_scale_urls,
     build_scale_urls,
@@ -14,13 +14,13 @@ from lanhu_design_mcp.design_assets import (
 
 def test_module_exists_and_exports_all_interfaces():
     """Contract test: the module must exist and export all four required signatures."""
-    spec = importlib.util.find_spec("lanhu_design_mcp.design_assets")
+    spec = importlib.util.find_spec("lanhu_design_mcp.design.assets")
     assert spec is not None, (
-        "lanhu_design_mcp.design_assets module is missing; "
+        "lanhu_design_mcp.design.assets module is missing; "
         "create it before proceeding to behavior tests."
     )
 
-    from lanhu_design_mcp.design_assets import (
+    from lanhu_design_mcp.design.assets import (
         assign_suggested_paths,
         build_ps_scale_urls,
         build_scale_urls,
@@ -34,7 +34,7 @@ def test_module_exists_and_exports_all_interfaces():
     assert callable(assign_suggested_paths)
 
     # Task 2: extract_design_slices must be present.
-    import lanhu_design_mcp.design_assets as da
+    import lanhu_design_mcp.design.assets as da
 
     assert hasattr(da, "extract_design_slices"), (
         "design_assets.extract_design_slices is missing; "
@@ -79,7 +79,7 @@ def test_safe_names_and_collisions_are_deterministic():
 # Task 2: Sketch and Figma slice extraction
 # ---------------------------------------------------------------------------
 
-from lanhu_design_mcp.design_assets import extract_design_slices
+from lanhu_design_mcp.design.assets import extract_design_slices
 
 
 def test_extracts_sketch_png_and_svg_slice():
