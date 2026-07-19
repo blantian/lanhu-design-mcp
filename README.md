@@ -1,4 +1,4 @@
-<!-- mcp-name: io.github.buluesky/lanhu-design-mcp -->
+<!-- mcp-name: io.github.blantian/lanhu-design-mcp -->
 
 # 蓝湖设计 MCP
 

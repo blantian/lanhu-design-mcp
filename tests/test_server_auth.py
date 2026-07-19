@@ -103,7 +103,7 @@ async def test_health_never_calls_legacy_or_network():
 class TestServerJson:
     def test_valid_json(self):
         data = json.loads(Path("server.json").read_text())
-        assert data["name"] == "io.github.buluesky/lanhu-design-mcp"
+        assert data["name"] == "io.github.blantian/lanhu-design-mcp"
         assert data["version"] == "0.1.0"
         assert "$schema" in data
 
@@ -204,3 +204,27 @@ class TestDocs:
         assert "macOS" in text
         assert "Linux" in text
         assert "Windows" in text
+
+
+# ---------------------------------------------------------------------------
+# Release identity contract tests
+# ---------------------------------------------------------------------------
+
+
+class TestReleaseIdentity:
+    def test_public_metadata_uses_blantian(self):
+        server = json.loads(Path("server.json").read_text())
+        assert server["name"] == "io.github.blantian/lanhu-design-mcp"
+        assert server["repository"]["url"] == "https://github.com/blantian/lanhu-design-mcp"
+
+        readme = Path("README.md").read_text()
+        assert "<!-- mcp-name: io.github.blantian/lanhu-design-mcp -->" in readme
+
+        pyproject = Path("pyproject.toml").read_text()
+        assert 'Homepage = "https://github.com/blantian/lanhu-design-mcp"' in pyproject
+        assert 'Repository = "https://github.com/blantian/lanhu-design-mcp"' in pyproject
+        assert 'Issues = "https://github.com/blantian/lanhu-design-mcp/issues"' in pyproject
+        assert "buluesky@example.com" not in pyproject
+
+        changelog = Path("CHANGELOG.md").read_text()
+        assert "https://github.com/blantian/lanhu-design-mcp/releases/tag/v0.1.0" in changelog

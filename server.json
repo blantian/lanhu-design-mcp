@@ -1,10 +1,10 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.buluesky/lanhu-design-mcp",
+  "name": "io.github.blantian/lanhu-design-mcp",
   "version": "0.1.0",
   "description": "Read Lanhu design specs and export fine-grained UI assets with platform-adjusted units",
   "repository": {
-    "url": "https://github.com/buluesky/lanhu-design-mcp",
+    "url": "https://github.com/blantian/lanhu-design-mcp",
     "source": "github"
   },
   "packages": [

@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-  {name = "lantian", email = "buluesky@example.com"}
+  {name = "lantian"}
 ]
 keywords = ["lanhu", "design", "ui", "android", "mcp", "design-to-code"]
 classifiers = [
@@ -32,9 +32,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/buluesky/lanhu-design-mcp"
-Repository = "https://github.com/buluesky/lanhu-design-mcp"
-Issues = "https://github.com/buluesky/lanhu-design-mcp/issues"
+Homepage = "https://github.com/blantian/lanhu-design-mcp"
+Repository = "https://github.com/blantian/lanhu-design-mcp"
+Issues = "https://github.com/blantian/lanhu-design-mcp/issues"
 
 [project.optional-dependencies]
 dev = [

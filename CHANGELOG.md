@@ -28,4 +28,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🚀 FastMCP 框架集成
 - 📋 完整的文档和示例
 
-[0.1.0]: https://github.com/buluesky/lanhu-design-mcp/releases/tag/v0.1.0
+[0.1.0]: https://github.com/blantian/lanhu-design-mcp/releases/tag/v0.1.0
