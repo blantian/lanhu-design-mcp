@@ -4,17 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
-import httpx
 import pytest
 
+from lanhu_design_mcp.auth.models import AuthDependencyError, AuthProfileLockedError
 from lanhu_design_mcp.auth.manager import (
-    AuthDependencyError,
-    AuthProfileLockedError,
-    HttpSessionValidator,
     ManagedBrowserAuth,
-    PlaywrightBrowserBackend,
     get_managed_auth,
 )
 from lanhu_design_mcp.auth.profile import (
@@ -22,18 +18,6 @@ from lanhu_design_mcp.auth.profile import (
 )
 
 
-# ---------------------------------------------------------------------------
-# filter_lanhu_cookies
-# ---------------------------------------------------------------------------
-# format_cookie_header
-# ---------------------------------------------------------------------------
-# AuthSnapshot serialization safety
-# ---------------------------------------------------------------------------
-# ensure_owned_profile
-# ---------------------------------------------------------------------------
-# remove_owned_profile
-# ---------------------------------------------------------------------------
-# cross-checks
 # ===========================================================================
 # Async state-machine tests — FakeBackend, no Playwright
 # ===========================================================================
@@ -536,261 +520,6 @@ class TestBrowserLock:
         await asyncio.sleep(0.2)
         await resolve_task
         await auth.shutdown()
-
-
-# ---------------------------------------------------------------------------
-# Fix 3/4: external close detection + cleanup exception safety
-# ---------------------------------------------------------------------------
-
-
-class FakeEvent:
-    """Simulates a Playwright event listener subscription."""
-
-    def __init__(self):
-        self._handlers = []
-
-    def add_listener(self, handler):
-        self._handlers.append(handler)
-
-    def fire(self):
-        for h in self._handlers:
-            h()
-
-
-class ClosableFakeSession(FakeSession):
-    """Session that fires on external close like real Playwright events."""
-
-    def __init__(self, *args, on_close=None, **kw):
-        super().__init__(*args, **kw)
-        self._on_close = on_close
-        self._close_event = FakeEvent()
-
-    def add_close_listener(self, handler):
-        self._close_event.add_listener(handler)
-
-    def simulate_external_close(self):
-        self._closed = True
-        self._close_event.fire()
-        if self._on_close:
-            self._on_close()
-
-    async def close(self):
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            self._close_event.fire()
-        except Exception:
-            pass
-
-
-class ClosableEventBackend:
-    """Backend producing sessions that support external close simulation."""
-
-    def __init__(self, cookies=None):
-        self._cookies = cookies or []
-        self.open_count = 0
-        self._last_session = None
-
-    async def open(self, profile_dir, *, headless=False):
-        self.open_count += 1
-        session = ClosableFakeSession(self._cookies)
-        self._last_session = session
-        return session
-
-
-class TestExternalClose:
-    @pytest.mark.asyncio
-    async def test_context_close_event_sets_session_closed(self, tmp_path):
-        backend = ClosableEventBackend(cookies=[])
-        auth = _auth(backend=backend, profile_dir=tmp_path / "profile")
-        await auth.start_login()
-        await asyncio.sleep(0.1)
-        assert backend._last_session is not None
-        assert not backend._last_session.is_closed()
-        backend._last_session.simulate_external_close()
-        await asyncio.sleep(0.15)
-        assert backend._last_session.is_closed()
-
-
-class TestCleanup:
-    @pytest.mark.asyncio
-    async def test_close_is_idempotent(self, tmp_path):
-        backend = ClosableEventBackend(cookies=[])
-        auth = _auth(backend=backend, profile_dir=tmp_path / "profile", timeout=0.05)
-        await auth.start_login()
-        await auth.wait_for_terminal_state()
-        if backend._last_session:
-            await backend._last_session.close()
-            await backend._last_session.close()
-            assert backend._last_session.is_closed()
-
-
-# ===========================================================================
-# Finding A: production event wiring — direct PlaywrightBrowserBackend tests
-# via fake async_playwright module (no real Playwright installed)
-# ===========================================================================
-
-
-class FakeContext:
-    def __init__(self):
-        self.pages = []
-        self._close_handlers = []
-        self.closed = False
-        self._close_raised = False
-
-    def on(self, event, handler):
-        if event == "close":
-            self._close_handlers.append(handler)
-
-    def fire_close(self):
-        self.closed = True
-        for h in self._close_handlers:
-            h()
-
-    async def cookies(self):
-        return [LANHU_SESSION, OTHER_COOKIE]
-
-    async def new_page(self):
-        page = FakePage(self)
-        self.pages.append(page)
-        return page
-
-    async def close(self):
-        self.fire_close()
-        if self._close_raised:
-            raise RuntimeError("close failed")
-
-
-class FakePage:
-    def __init__(self, context):
-        self._close_handlers = []
-        self.closed = False
-        self._context = context
-        self._goto_url = None
-
-    def on(self, event, handler):
-        if event == "close":
-            self._close_handlers.append(handler)
-
-    async def goto(self, url, **kw):
-        self._goto_url = url
-
-    def fire_close(self):
-        self.closed = True
-        for h in self._close_handlers:
-            h()
-
-
-class FakeBrowserType:
-    def __init__(self):
-        self._last_context = None
-
-    async def launch_persistent_context(self, **kw):
-        ctx = FakeContext()
-        self._last_context = ctx
-        return ctx
-
-
-class FakePlaywright:
-    def __init__(self):
-        self.chromium = FakeBrowserType()
-        self._exit_count = 0
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        self._exit_count += 1
-
-
-class TestPlaywrightBackendAdapter:
-    @staticmethod
-    def _install_fake_playwright(fake_ap):
-        import sys
-        import types
-        fake_mod = types.ModuleType("playwright.async_api")
-        fake_mod.async_playwright = lambda: fake_ap
-        sys.modules["playwright"] = types.ModuleType("playwright")
-        sys.modules["playwright.async_api"] = fake_mod
-        return fake_mod
-
-    def test_context_close_event_sets_session_closed(self):
-        """Fire external context close → is_closed True, then close stops driver once."""
-        async def run():
-            backend = PlaywrightBrowserBackend()
-            fp = FakePlaywright()
-            self._install_fake_playwright(fp)
-            session = await backend.open(Path("/tmp/fake-profile"), headless=True)
-            assert not session.is_closed()
-            # Fire external context close — no owned session.close() yet
-            fp.chromium._last_context.fire_close()
-            assert session.is_closed()
-            # Owned close still stops driver (driver was not stopped by event alone)
-            assert fp._exit_count == 0
-            await session.close()
-            assert fp._exit_count == 1
-
-        asyncio.run(run())
-
-    def test_visible_mode_navigates_and_wires_page_close(self):
-        """Visible open reuses context page, navigates to Lanhu, page close fires."""
-        async def run():
-            backend = PlaywrightBrowserBackend()
-            fp = FakePlaywright()
-            self._install_fake_playwright(fp)
-            session = await backend.open(Path("/tmp/fake-profile"), headless=False)
-            ctx = fp.chromium._last_context
-            assert ctx is not None
-            assert len(ctx.pages) == 1
-            page = ctx.pages[0]
-            assert page._goto_url == "https://lanhuapp.com/"
-            # No second page created when an existing page is present
-            assert len(ctx.pages) == 1
-            # Fire external page close
-            assert not session.is_closed()
-            page.fire_close()
-            assert session.is_closed()
-            # Owned close stops driver exactly once
-            assert fp._exit_count == 0
-            await session.close()
-            assert fp._exit_count == 1
-
-        asyncio.run(run())
-
-    def test_navigation_failure_still_stops_playwright(self):
-        """goto raises AND context.close raises → Playwright stopped exactly once."""
-        async def run():
-            backend = PlaywrightBrowserBackend()
-            fp = FakePlaywright()
-            self._install_fake_playwright(fp)
-
-            class FailingPage(FakePage):
-                async def goto(self, url, **kw):
-                    raise RuntimeError("connection refused")
-
-            async def launch_with_failing_goto(self, **kw):
-                ctx = FakeContext()
-                self._last_context = ctx
-                if not kw.get("headless"):
-                    page = FailingPage(ctx)
-                    ctx.pages = [page]
-                    ctx._close_raised = True
-                return ctx
-
-            with patch.object(FakeBrowserType, "launch_persistent_context", launch_with_failing_goto):
-                with pytest.raises(Exception):
-                    await backend.open(Path("/tmp/fake-profile"), headless=False)
-                assert fp._exit_count == 1
-
-        asyncio.run(run())
-
-
-# ===========================================================================
-# Finding B: lock releases before close
-# ===========================================================================
-
-
 class BlockingCloseBackend:
     """Backend whose session.close() blocks until an event is set."""
 
@@ -1004,132 +733,80 @@ class TestSessionValidation:
 
 
 # ===========================================================================
-# Direct HttpSessionValidator response classification (no network)
 # ===========================================================================
 
-
-ACCOUNT_URL = "https://lanhuapp.com/api/account/user/detail"
-
-def _make_resp(status, json_body=None, text_body="", headers=None, history=None):
-    import json as _json
-    content = _json.dumps(json_body).encode() if json_body is not None else text_body.encode()
-    hdrs = dict(headers or {})
-    if json_body is not None:
-        hdrs.setdefault("content-type", "application/json")
-    return httpx.Response(status, headers=hdrs, content=content,
-                          request=httpx.Request("GET", ACCOUNT_URL),
-                          history=list(history or []))
+class FakeEvent:
+    """Simulates a Playwright event listener subscription."""
+    def __init__(self):
+        self._handlers = []
+    def add_listener(self, handler):
+        self._handlers.append(handler)
+    def fire(self):
+        for h in self._handlers:
+            h()
 
 
-class TestHttpSessionValidator:
-    """Deterministic classification tests — no real HTTP.
+class ClosableFakeSession(FakeSession):
+    """Session that fires on external close like real Playwright events."""
+    def __init__(self, *args, on_close=None, **kw):
+        super().__init__(*args, **kw)
+        self._on_close = on_close
+        self._close_event = FakeEvent()
+    def add_close_listener(self, handler):
+        self._close_event.add_listener(handler)
+    def simulate_external_close(self):
+        self._closed = True
+        self._close_event.fire()
+        if self._on_close:
+            self._on_close()
+    async def close(self):
+        if self._closed: return
+        self._closed = True
+        try: self._close_event.fire()
+        except Exception: pass
 
-    Live contract: GET /api/account/user/detail
-      Authenticated → 200 {code: "00000", msg: ..., result: {...}}
-      Anonymous     → 401 {code: 30001}
-    """
 
+class ClosableEventBackend:
+    """Backend producing sessions that support external close simulation."""
+    def __init__(self, cookies=None):
+        self._cookies = cookies or []
+        self.open_count = 0
+        self._last_session = None
+    async def open(self, profile_dir, *, headless=False):
+        self.open_count += 1
+        session = ClosableFakeSession(self._cookies)
+        self._last_session = session
+        return session
+
+
+class TestExternalClose:
     @pytest.mark.asyncio
-    async def test_200_code_00000_is_true(self):
-        v = HttpSessionValidator()
-        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, {"code": "00000"}))):
-            assert await v.validate("s=x") is True
+    async def test_context_close_event_sets_session_closed(self, tmp_path):
+        backend = ClosableEventBackend(cookies=[])
+        auth = _auth(backend=backend, profile_dir=tmp_path / "profile")
+        await auth.start_login()
+        await asyncio.sleep(0.1)
+        assert backend._last_session is not None
+        assert not backend._last_session.is_closed()
+        backend._last_session.simulate_external_close()
+        await asyncio.sleep(0.15)
+        assert backend._last_session.is_closed()
 
+
+class TestCleanup:
     @pytest.mark.asyncio
-    async def test_200_code_not_00000_is_false(self):
-        v = HttpSessionValidator()
-        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, {"code": "00001"}))):
-            assert await v.validate("s=x") is False
-
-    @pytest.mark.asyncio
-    async def test_200_code_numeric_0_is_false(self):
-        v = HttpSessionValidator()
-        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, {"code": 0}))):
-            assert await v.validate("s=x") is False
-
-    @pytest.mark.asyncio
-    async def test_200_code_str_0_is_false(self):
-        v = HttpSessionValidator()
-        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, {"code": "0"}))):
-            assert await v.validate("s=x") is False
-
-    @pytest.mark.asyncio
-    async def test_200_missing_code_is_false(self):
-        v = HttpSessionValidator()
-        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, {"msg": "ok"}))):
-            assert await v.validate("s=x") is False
-
-    @pytest.mark.asyncio
-    async def test_401_is_false(self):
-        v = HttpSessionValidator()
-        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(401, {"code": 30001}))):
-            assert await v.validate("s=x") is False
-
-    @pytest.mark.asyncio
-    async def test_500_is_false(self):
-        v = HttpSessionValidator()
-        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(500, {"code": "00000"}))):
-            assert await v.validate("s=x") is False
-
-    @pytest.mark.asyncio
-    async def test_redirect_history_to_login_is_false(self):
-        redirect = httpx.Response(
-            302, headers={"Location": "https://lanhuapp.com/login"},
-            request=httpx.Request("GET", ACCOUNT_URL),
-        )
-        v = HttpSessionValidator()
-        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, {"code": "00000"}, history=[redirect]))):
-            assert await v.validate("s=x") is False
-
-    @pytest.mark.asyncio
-    async def test_malformed_json_is_false(self):
-        v = HttpSessionValidator()
-        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, text_body="not json"))):
-            assert await v.validate("s=x") is False
-
-    @pytest.mark.asyncio
-    async def test_non_dict_json_is_false(self):
-        v = HttpSessionValidator()
-        with patch.object(httpx.AsyncClient, "get", AsyncMock(return_value=_make_resp(200, json_body=[]))):
-            assert await v.validate("s=x") is False
-
-    @pytest.mark.asyncio
-    async def test_network_error_is_false(self):
-        v = HttpSessionValidator()
-        with patch.object(httpx.AsyncClient, "get", AsyncMock(side_effect=RuntimeError("network"))):
-            assert await v.validate("s=x") is False
-
-    @pytest.mark.asyncio
-    async def test_timeout_is_false(self):
-        v = HttpSessionValidator()
-        with patch.object(httpx.AsyncClient, "get", AsyncMock(side_effect=httpx.TimeoutException("timeout"))):
-            assert await v.validate("s=x") is False
-
-    @pytest.mark.asyncio
-    async def test_requests_account_endpoint_with_safe_headers(self):
-        v = HttpSessionValidator()
-        mock_get = AsyncMock(return_value=_make_resp(200, {"code": "00000"}))
-        with patch.object(httpx.AsyncClient, "get", mock_get):
-            await v.validate("s=fakevalue")
-        call_args = mock_get.call_args
-        url = call_args[0][0]
-        req_headers = call_args[1]["headers"]
-        assert url == ACCOUNT_URL
-        assert "Cookie" in req_headers
-        # Cookie value is present (it's the input) — we only verify the key
-        assert req_headers.get("Referer") == "https://lanhuapp.com/web/"
-        assert req_headers.get("request-from") == "web"
-
-
-# ===========================================================================
-# macOS-only boundary
-# ===========================================================================
-
-
+    async def test_close_is_idempotent(self, tmp_path):
+        backend = ClosableEventBackend(cookies=[])
+        auth = _auth(backend=backend, profile_dir=tmp_path / "profile", timeout=0.05)
+        await auth.start_login()
+        await auth.wait_for_terminal_state()
+        if backend._last_session:
+            await backend._last_session.close()
+            await backend._last_session.close()
+            assert backend._last_session.is_closed()
 
 
 class TestMacOSOnlyBoundary:
-
     @pytest.mark.asyncio
     async def test_start_login_rejects_non_darwin_without_opening_browser(self):
         backend = AsyncMock()

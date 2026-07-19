@@ -1,4 +1,4 @@
-"""托管浏览器认证：协议、会话验证、Playwright 生命周期与状态机。"""
+"""托管浏览器认证：状态机、凭证缓存与登录工作协程。"""
 
 from __future__ import annotations
 
@@ -6,8 +6,9 @@ import asyncio
 import platform
 import uuid
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
+from .browser import BrowserBackend, BrowserSession, PlaywrightBrowserBackend
 from .models import (
     AuthDependencyError,
     AuthProfileLockedError,
@@ -24,181 +25,9 @@ from .profile import (
     format_cookie_header,
     remove_owned_profile,
 )
-
-class BrowserSession(Protocol):
-    """蓝湖：浏览器会话协议。"""
-    async def cookies(self) -> list[dict[str, Any]]:
-        """蓝湖：返回当前上下文的所有Cookie。"""
-        ...
-    def is_closed(self) -> bool:
-        """蓝湖：窗口或上下文是否已关闭。"""
-        ...
-    async def close(self) -> None:
-        """蓝湖：关闭上下文并停止驱动。"""
-        ...
-
-
-class BrowserBackend(Protocol):
-    """蓝湖：浏览器后端协议。"""
-    async def open(self, profile_dir: Path, *, headless: bool) -> BrowserSession:
-        """蓝湖：使用指定Profile打开浏览器上下文。"""
-        ...
-
-
-class SessionValidator(Protocol):
-    """蓝湖：会话验证协议。"""
-
-    async def validate(self, cookie_header: str) -> bool:
-        """蓝湖：验证Cookie头是否有效。"""
-        ...
-
-
-# ---- 认证状态机与内部方法 ----
-# 托管浏览器认证——异步状态机
-# ---- 认证状态机与内部方法 ----
+from .validator import HttpSessionValidator, SessionValidator
 
 AUTH_COOKIE_NAMES = {"session", "user_token"}
-
-
-class HttpSessionValidator:
-    """通过请求蓝湖账号端点验证Cookie头有效性。"""
-
-    def __init__(self, timeout: float = 10.0) -> None:
-        """使用可配置HTTP超时进行初始化。"""
-        self._timeout = timeout
-
-    async def validate(self, cookie_header: str) -> bool:
-        """向蓝湖账号端点发送请求验证Cookie会话有效性。"""
-        import httpx
-
-        try:
-            async with httpx.AsyncClient(
-                timeout=self._timeout, follow_redirects=True,
-            ) as client:
-                response = await client.get(
-                    "https://lanhuapp.com/api/account/user/detail",
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-                        "Accept": "application/json, text/plain, */*",
-                        "Referer": "https://lanhuapp.com/web/",
-                        "request-from": "web",
-                        "Cookie": cookie_header,
-                    },
-                )
-        except Exception:
-            return False
-
-        # 蓝湖：仅2xx响应有资格进入正向分类
-        if response.status_code < 200 or response.status_code >= 300:
-            return False
-
-        # 蓝湖：响应本身的认证失败证据
-        if response.status_code in {401, 418}:
-            return False
-        location = response.headers.get("location", "")
-        if response.is_redirect and "login" in location.lower():
-            return False
-        for h in response.history or ():
-            loc = h.headers.get("location", "")
-            if h.is_redirect and "login" in loc.lower():
-                return False
-
-        try:
-            data = response.json()
-        except Exception:
-            return False
-
-        if not isinstance(data, dict):
-            return False
-
-        # 蓝湖：显式成功契约——code=="00000"
-        return data.get("code") == "00000"
-
-
-class PlaywrightBrowserBackend:
-    """通过Playwright和已安装系统Chrome操作真实浏览器。"""
-
-    async def open(self, profile_dir: Path, *, headless: bool) -> BrowserSession:
-        """启动持久化Chrome上下文；可见模式导航至lanhuapp.com。"""
-        try:
-            from playwright.async_api import async_playwright  # type: ignore[import-untyped]
-        except ImportError as exc:
-            raise AuthDependencyError(
-                "Install automatic login with: pip install --upgrade lanhu-design-mcp"
-            ) from exc
-
-        pw = None
-        context = None
-        page = None
-        try:
-            pw = await async_playwright().__aenter__()
-            context = await pw.chromium.launch_persistent_context(
-                user_data_dir=str(profile_dir),
-                channel="chrome",
-                headless=headless,
-            )
-        except Exception as exc:
-            if pw is not None:
-                await pw.__aexit__(None, None, None)
-            msg = str(exc).lower()
-            if "executable" in msg and "chrome" in msg:
-                raise AuthDependencyError("Google Chrome is required for automatic login.") from exc
-            if "lock" in msg or "profile" in msg:
-                raise AuthProfileLockedError("The managed browser profile is locked.") from exc
-            raise
-
-        if not headless:
-            try:
-                pages = context.pages
-                page = pages[0] if pages else await context.new_page()
-                await page.goto("https://lanhuapp.com/", wait_until="domcontentloaded")
-            except Exception:
-                try:
-                    await context.close()
-                except Exception:
-                    pass
-                await pw.__aexit__(None, None, None)
-                raise
-
-        class _PlaywrightSession:
-            """封装BrowserContext和Playwright驱动的闭包会话。"""
-            def __init__(self_):
-                """注册上下文与页面的关闭事件回调以同步状态。"""
-                self_._closed = False
-                self_._driver_stopped = False
-
-                def on_close(*args: Any) -> None:
-                    """页面或上下文关闭事件回调，同步闭包状态标记。"""
-                    self_._closed = True
-
-                context.on("close", on_close)
-                if page is not None:
-                    page.on("close", on_close)
-
-            async def cookies(self_):
-                """返回当前浏览器上下文的所有Cookie列表。"""
-                return await context.cookies()
-
-            def is_closed(self_):
-                """上下文是否已通过外部事件或主动关闭。"""
-                return self_._closed
-
-            async def close(self_):
-                """关闭上下文并停止Playwright驱动，可安全重复调用。"""
-                if self_._closed and self_._driver_stopped:
-                    return
-                self_._closed = True
-                try:
-                    await context.close()
-                except Exception:
-                    pass
-                try:
-                    await pw.__aexit__(None, None, None)
-                except Exception:
-                    pass
-                self_._driver_stopped = True
-
-        return _PlaywrightSession()
 
 
 class ManagedBrowserAuth:

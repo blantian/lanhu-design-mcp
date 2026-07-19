@@ -10,3 +10,8 @@ def test_auth_manager_module_exists():
 def test_auth_foundation_modules_exist():
     assert find_spec("lanhu_design_mcp.auth.models") is not None
     assert find_spec("lanhu_design_mcp.auth.profile") is not None
+
+
+def test_auth_runtime_modules_exist():
+    assert find_spec("lanhu_design_mcp.auth.validator") is not None
+    assert find_spec("lanhu_design_mcp.auth.browser") is not None
