@@ -44,55 +44,25 @@ async def test_auth_logout_confirm_forwarded():
 
 
 @pytest.mark.asyncio
-async def test_health_lists_auth_tools_and_uses_status_now():
+async def test_health_reports_only_managed_auth_metadata():
     auth = Mock()
     auth.status_now.return_value = AuthSnapshot("missing", False, "missing", []).to_dict()
-    with (
-        patch("lanhu_design_mcp.server.get_settings") as mock_settings,
-        patch("lanhu_design_mcp.server.get_managed_auth", return_value=auth),
-    ):
-        mock_settings.return_value.lanhu_cookie = ""
-        mock_settings.return_value.lanhu_cookie_source = "missing"
-        mock_settings.return_value.lanhu_cookie_names = []
-        mock_settings.return_value.dds_cookie = ""
-        mock_settings.return_value.dds_cookie_source = "missing"
-        mock_settings.return_value.dds_cookie_names = []
-        mock_settings.return_value.lanhu_cookie_file = None
-        mock_settings.return_value.dds_cookie_file = None
-
+    with patch("lanhu_design_mcp.server.get_managed_auth", return_value=auth):
         from lanhu_design_mcp.server import lanhu_health_check
         result = await lanhu_health_check()
-
+    assert set(result) == {"sdk", "tools", "managedAuth"}
+    assert result["sdk"] == "fastmcp"
     assert "lanhu_auth_login" in result["tools"]
     assert "lanhu_auth_status" in result["tools"]
     assert "lanhu_auth_logout" in result["tools"]
-    assert "managedAuth" in result
-    auth.resolve_cookie.assert_not_called()
     auth.status_now.assert_called_once()
 
 
-@pytest.mark.asyncio
-async def test_health_never_calls_legacy_or_network():
-    auth = Mock()
-    auth.status_now.return_value = AuthSnapshot("missing", False, "missing", []).to_dict()
-    with (
-        patch("lanhu_design_mcp.server.get_settings") as mock_settings,
-        patch("lanhu_design_mcp.server.get_managed_auth", return_value=auth),
-    ):
-        mock_settings.return_value.lanhu_cookie = ""
-        mock_settings.return_value.lanhu_cookie_source = "missing"
-        mock_settings.return_value.lanhu_cookie_names = []
-        mock_settings.return_value.dds_cookie = ""
-        mock_settings.return_value.dds_cookie_source = "missing"
-        mock_settings.return_value.dds_cookie_names = []
-        mock_settings.return_value.lanhu_cookie_file = None
-        mock_settings.return_value.dds_cookie_file = None
-
-        from lanhu_design_mcp.server import lanhu_health_check
-        await lanhu_health_check()
-
-    auth.resolve_cookie.assert_not_called()
-    auth.status_now.assert_called_once()
+def test_main_always_runs_stdio():
+    with patch("lanhu_design_mcp.server.mcp.run") as run:
+        from lanhu_design_mcp.server import main
+        main()
+    run.assert_called_once_with(transport="stdio")
 
 
 # ---------------------------------------------------------------------------

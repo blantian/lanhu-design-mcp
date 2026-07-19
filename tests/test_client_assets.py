@@ -44,8 +44,13 @@ from lanhu_design_mcp.url_parser import LanhuUrl
 
 
 def settings() -> Settings:
-    return Settings("session=test", "session=test", Path("data"), 30, "stdio", "127.0.0.1", 8000,
-                    "env", None, ["session"], "lanhu", None, ["session"])
+    return Settings(
+        lanhu_cookie="session=test",
+        dds_cookie="session=test",
+        http_timeout=30,
+        lanhu_cookie_source="managed_browser",
+        lanhu_cookie_names=["session"],
+    )
 
 
 @pytest.mark.asyncio
@@ -86,13 +91,13 @@ def _resp(status, url="https://lanhuapp.com/api/project/images", headers=None, h
 class TestEmptyCookieRaisesAuthRequired:
     def test_empty_cookie_construction_raises_auth_required(self):
         with pytest.raises(LanhuAuthRequiredError):
-            LanhuClient(Settings("", "", Path("data"), 30, "stdio", "127.0.0.1", 8000,
-                                 "missing", None, [], "missing", None, []))
+            LanhuClient(Settings(lanhu_cookie="", dds_cookie="", http_timeout=30,
+                                 lanhu_cookie_source="missing", lanhu_cookie_names=[]))
 
     def test_empty_cookie_error_has_safe_payload(self):
         try:
-            LanhuClient(Settings("", "", Path("data"), 30, "stdio", "127.0.0.1", 8000,
-                                 "missing", None, [], "missing", None, []))
+            LanhuClient(Settings(lanhu_cookie="", dds_cookie="", http_timeout=30,
+                                 lanhu_cookie_source="missing", lanhu_cookie_names=[]))
         except LanhuAuthRequiredError as exc:
             d = exc.to_dict()
             assert d == {"status": "auth_required", "nextAction": "lanhu_auth_login"}
@@ -169,17 +174,11 @@ class TestDesignServiceAuthIntegration:
         from lanhu_design_mcp.design_service import DesignService
 
         auth = AsyncMock()
-        auth.resolve_cookie.return_value = CookieInfo(True, "session=managed", "managed_browser", None, ["session"])
+        auth.resolve_cookie.return_value = CookieInfo(True, "session=managed", "managed_browser", ["session"])
         auth.invalidate = Mock()
 
         service = DesignService(managed_auth=auth)
-        from lanhu_design_mcp.config import get_settings
-        service.settings = get_settings(
-            include_browser_fallback=False,
-            lanhu_override=CookieInfo(False, "", "missing", None, []),
-        )
 
-        # Let _resolve_settings work, but make LanhuClient raise auth error
         with patch("lanhu_design_mcp.design_service.LanhuClient") as mock_client_cls:
             mock_client_cls.side_effect = LanhuAuthRequiredError()
             with pytest.raises(LanhuAuthRequiredError):

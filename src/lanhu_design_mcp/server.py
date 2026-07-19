@@ -4,7 +4,6 @@ from typing import Annotated, Literal
 
 from fastmcp import FastMCP
 
-from .config import default_lanhu_cookie_file, get_settings
 from .design_service import DesignService
 from .managed_auth import get_managed_auth
 
@@ -16,18 +15,7 @@ mcp = FastMCP("Lanhu Design MCP")
 @mcp.tool()
 async def lanhu_health_check() -> dict:
     """Return local configuration status without accessing the network or exposing cookie values."""
-    settings = get_settings(include_browser_fallback=False)
-    auth = get_managed_auth()
-    auth_snapshot = auth.status_now()
     return {
-        "configured": bool(settings.lanhu_cookie),
-        "cookieSource": settings.lanhu_cookie_source,
-        "cookieFile": str(settings.lanhu_cookie_file) if settings.lanhu_cookie_file else None,
-        "cookieNames": settings.lanhu_cookie_names,
-        "ddsCookieSource": settings.dds_cookie_source,
-        "ddsCookieFile": str(settings.dds_cookie_file) if settings.dds_cookie_file else None,
-        "ddsCookieNames": settings.dds_cookie_names,
-        "defaultCookieFile": str(default_lanhu_cookie_file()),
         "sdk": "fastmcp",
         "tools": [
             "lanhu_health_check",
@@ -39,7 +27,7 @@ async def lanhu_health_check() -> dict:
             "lanhu_auth_status",
             "lanhu_auth_logout",
         ],
-        "managedAuth": auth_snapshot,
+        "managedAuth": get_managed_auth().status_now(),
     }
 
 
@@ -100,12 +88,8 @@ async def lanhu_auth_logout(confirm: bool = False) -> dict:
 
 
 def main() -> None:
-    settings = get_settings(include_browser_fallback=False)
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    if settings.transport == "stdio":
-        mcp.run(transport="stdio")
-    else:
-        mcp.run(transport="http", path="/mcp", host=settings.host, port=settings.port)
+    """Start the FastMCP server in foreground stdio mode."""
+    mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":

@@ -277,7 +277,7 @@ class TestWindowsMode:
 
 class TestCookieInfoCompatibility:
     def test_cookie_info_accepts_managed_browser_source(self):
-        info = CookieInfo(True, "session=x", "managed_browser", None, ["session"])
+        info = CookieInfo(True, "session=x", "managed_browser", ["session"])
         assert info.source == "managed_browser"
         assert info.configured is True
         assert info.cookie_names == ["session"]

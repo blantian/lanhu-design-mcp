@@ -1,174 +1,40 @@
+"""Minimal settings model for managed Lanhu authentication results."""
+
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv(override=False)
-except Exception:
-    pass
-
-CookieSource = Literal["file", "env", "browser", "managed_browser", "lanhu", "missing"]
+CookieSource = Literal["managed_browser", "missing"]
 
 
 @dataclass(frozen=True)
 class CookieInfo:
+    """Resolved session header and safe diagnostic names from the managed browser."""
+
     configured: bool
     cookie: str
     source: CookieSource
-    cookie_file: Path | None
     cookie_names: list[str]
-
-
-def cookie_names_from_header(cookie: str) -> list[str]:
-    names: list[str] = []
-    for segment in cookie.split(";"):
-        part = segment.strip()
-        if "=" not in part:
-            continue
-        name = part.split("=", 1)[0].strip()
-        if name:
-            names.append(name)
-    return names
-
-
-def default_lanhu_cookie_file() -> Path:
-    return Path.home() / ".config" / "cagent" / "lanhu" / "cookie.txt"
-
-
-def _read_cookie_file(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
-
-
-def _missing_cookie_info() -> CookieInfo:
-    return CookieInfo(False, "", "missing", None, [])
-
-
-def resolve_configured_lanhu_cookie() -> CookieInfo:
-    cookie_file_path = os.getenv("LANHU_COOKIE_FILE", "").strip()
-    if cookie_file_path:
-        path = Path(cookie_file_path)
-        cookie = _read_cookie_file(path)
-        if cookie:
-            return CookieInfo(True, cookie, "file", path, cookie_names_from_header(cookie))
-    path = default_lanhu_cookie_file()
-    cookie = _read_cookie_file(path)
-    if cookie:
-        return CookieInfo(True, cookie, "file", path, cookie_names_from_header(cookie))
-    cookie = os.getenv("LANHU_COOKIE", "").strip()
-    if cookie:
-        return CookieInfo(True, cookie, "env", None, cookie_names_from_header(cookie))
-    return _missing_cookie_info()
-
-
-def resolve_legacy_browser_cookie() -> CookieInfo:
-    if os.getenv("AUTO_BROWSER_COOKIES", "false").lower() not in {"true", "1", "yes"}:
-        return _missing_cookie_info()
-    try:
-        from .browser_cookies import get_lanhu_cookies
-
-        cookie = get_lanhu_cookies()
-    except Exception:
-        import sys
-
-        print("警告: 自动获取浏览器 Cookies 失败", file=sys.stderr)
-        return _missing_cookie_info()
-    if not cookie:
-        return _missing_cookie_info()
-    return CookieInfo(True, cookie, "browser", None, cookie_names_from_header(cookie))
-
-
-def resolve_lanhu_cookie() -> CookieInfo:
-    configured = resolve_configured_lanhu_cookie()
-    if configured.configured:
-        return configured
-    return resolve_legacy_browser_cookie()
-
-
-def resolve_dds_cookie(lanhu_info: CookieInfo) -> CookieInfo:
-    # 1. DDS_COOKIE_FILE
-    cookie_file_path = os.getenv("DDS_COOKIE_FILE", "").strip()
-    if cookie_file_path:
-        p = Path(cookie_file_path)
-        cookie = _read_cookie_file(p)
-        if cookie:
-            return CookieInfo(
-                configured=True,
-                cookie=cookie,
-                source="file",
-                cookie_file=p,
-                cookie_names=cookie_names_from_header(cookie),
-            )
-
-    # 2. DDS_COOKIE env var
-    cookie = os.getenv("DDS_COOKIE", "").strip()
-    if cookie:
-        return CookieInfo(
-            configured=True,
-            cookie=cookie,
-            source="env",
-            cookie_file=None,
-            cookie_names=cookie_names_from_header(cookie),
-        )
-
-    # 3. Resolved Lanhu cookie
-    return CookieInfo(
-        configured=lanhu_info.configured,
-        cookie=lanhu_info.cookie,
-        source="lanhu",
-        cookie_file=None,
-        cookie_names=lanhu_info.cookie_names,
-    )
 
 
 @dataclass(frozen=True)
 class Settings:
+    """Client configuration shared by Lanhu API and DDS requests."""
+
     lanhu_cookie: str
     dds_cookie: str
-    data_dir: Path
     http_timeout: float
-    transport: str
-    host: str
-    port: int
     lanhu_cookie_source: CookieSource
-    lanhu_cookie_file: Path | None
     lanhu_cookie_names: list[str]
-    dds_cookie_source: CookieSource
-    dds_cookie_file: Path | None
-    dds_cookie_names: list[str]
 
 
-def get_settings(
-    *,
-    include_browser_fallback: bool = True,
-    lanhu_override: CookieInfo | None = None,
-) -> Settings:
-    if lanhu_override is not None:
-        lanhu_info = lanhu_override
-    else:
-        lanhu_info = resolve_configured_lanhu_cookie()
-        if include_browser_fallback and not lanhu_info.configured:
-            lanhu_info = resolve_legacy_browser_cookie()
-    dds_info = resolve_dds_cookie(lanhu_info)
+def settings_from_cookie(info: CookieInfo) -> Settings:
+    """Convert a validated managed session into Lanhu client configuration."""
     return Settings(
-        lanhu_cookie=lanhu_info.cookie,
-        dds_cookie=dds_info.cookie,
-        data_dir=Path(os.getenv("DATA_DIR", "./data")),
-        http_timeout=float(os.getenv("HTTP_TIMEOUT", "30")),
-        transport=os.getenv("MCP_TRANSPORT", "stdio").lower(),
-        host=os.getenv("SERVER_HOST", "0.0.0.0"),
-        port=int(os.getenv("SERVER_PORT", "8000")),
-        lanhu_cookie_source=lanhu_info.source,
-        lanhu_cookie_file=lanhu_info.cookie_file,
-        lanhu_cookie_names=lanhu_info.cookie_names,
-        dds_cookie_source=dds_info.source,
-        dds_cookie_file=dds_info.cookie_file,
-        dds_cookie_names=dds_info.cookie_names,
+        lanhu_cookie=info.cookie,
+        dds_cookie=info.cookie,
+        http_timeout=30.0,
+        lanhu_cookie_source=info.source,
+        lanhu_cookie_names=list(info.cookie_names),
     )

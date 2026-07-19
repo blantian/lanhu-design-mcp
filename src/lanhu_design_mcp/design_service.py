@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 
 from .client import LanhuAuthRequiredError, LanhuClient
-from .config import get_settings, resolve_legacy_browser_cookie
+from .config import settings_from_cookie
 from .design_assets import assign_suggested_paths, extract_design_slices, sanitize_asset_name
 from .design_ir import summarize_schema
 from .platform_units import TargetPlatform
@@ -38,7 +38,6 @@ def resolve_design(designs: list[dict[str, Any]], ref: LanhuUrl, selector: str |
 
 class DesignService:
     def __init__(self, managed_auth=None):
-        self.settings = get_settings(include_browser_fallback=False)
         self.managed_auth = managed_auth  # injected for tests; lazily imported for production
 
     # ------------------------------------------------------------------
@@ -46,17 +45,13 @@ class DesignService:
     # ------------------------------------------------------------------
 
     async def _resolve_settings(self):
-        if self.settings.lanhu_cookie:
-            return self.settings
         if self.managed_auth is None:
             from .managed_auth import get_managed_auth
             self.managed_auth = get_managed_auth()
         info = await self.managed_auth.resolve_cookie()
         if not info.configured:
-            info = resolve_legacy_browser_cookie()
-        if not info.configured:
             raise LanhuAuthRequiredError()
-        return get_settings(include_browser_fallback=False, lanhu_override=info)
+        return settings_from_cookie(info)
 
     @asynccontextmanager
     async def _client(self):

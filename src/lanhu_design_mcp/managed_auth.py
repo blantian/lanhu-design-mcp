@@ -486,17 +486,17 @@ class ManagedBrowserAuth:
 
     async def resolve_cookie(self) -> CookieInfo:
         if self._reject_unsupported_platform():
-            return CookieInfo(False, "", "missing", None, [])
+            return CookieInfo(False, "", "missing", [])
         if self._cached_header:
-            return CookieInfo(True, self._cached_header, "managed_browser", None, list(self._cached_names))
+            return CookieInfo(True, self._cached_header, "managed_browser", list(self._cached_names))
 
         async with self._browser_lock:
             if self._cached_header:
-                return CookieInfo(True, self._cached_header, "managed_browser", None, list(self._cached_names))
+                return CookieInfo(True, self._cached_header, "managed_browser", list(self._cached_names))
 
             profile = self._resolve_profile()
             if not (profile / PROFILE_MARKER).is_file():
-                return CookieInfo(False, "", "missing", None, [])
+                return CookieInfo(False, "", "missing", [])
 
             try:
                 ensure_owned_profile(profile)
@@ -508,32 +508,32 @@ class ManagedBrowserAuth:
             except AuthDependencyError:
                 self._state = "dependency_missing"
                 self._message = self._safe_dependency_message()
-                return CookieInfo(False, "", "missing", None, [])
+                return CookieInfo(False, "", "missing", [])
             except AuthProfileLockedError:
                 self._state = "profile_locked"
                 self._message = self._safe_profile_locked_message()
-                return CookieInfo(False, "", "missing", None, [])
+                return CookieInfo(False, "", "missing", [])
             except Exception:
                 self._state = "failed"
                 self._message = self._safe_failure_message()
-                return CookieInfo(False, "", "missing", None, [])
+                return CookieInfo(False, "", "missing", [])
 
             allowed = filter_lanhu_cookies(cookies)
             if not self._has_auth_cookie(cookies) or not allowed:
-                return CookieInfo(False, "", "missing", None, [])
+                return CookieInfo(False, "", "missing", [])
 
             header = format_cookie_header(allowed)
             try:
                 if not await self._resolve_validator().validate(header):
-                    return CookieInfo(False, "", "missing", None, [])
+                    return CookieInfo(False, "", "missing", [])
             except Exception:
-                return CookieInfo(False, "", "missing", None, [])
+                return CookieInfo(False, "", "missing", [])
 
             self._cached_header = header
             self._cached_names = [c["name"] for c in allowed]
             self._state = "authenticated"
             self._message = None
-            return CookieInfo(True, header, "managed_browser", None, list(self._cached_names))
+            return CookieInfo(True, header, "managed_browser", list(self._cached_names))
 
     def invalidate(self) -> None:
         self._cached_header = None
