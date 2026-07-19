@@ -29,6 +29,9 @@ venv/
 ENV/
 env/
 
+# Isolated development worktrees
+.worktrees/
+
 # IDE
 .vscode/
 .idea/
