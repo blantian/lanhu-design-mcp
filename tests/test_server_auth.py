@@ -73,7 +73,7 @@ class TestServerJson:
     def test_valid_json(self):
         data = json.loads(Path("server.json").read_text())
         assert data["name"] == "io.github.blantian/lanhu-design-mcp"
-        assert data["version"] == "0.1.0"
+        assert data["version"] == "0.1.1"
         assert "$schema" in data
 
     def test_description_length(self):
@@ -90,29 +90,12 @@ class TestServerJson:
         pkg = data["packages"][0]
         assert pkg["identifier"] == "lanhu-design-mcp"
         assert pkg["registryType"] == "pypi"
-        assert pkg["version"] == "0.1.0"
+        assert pkg["version"] == "0.1.1"
         assert pkg["transport"]["type"] == "stdio"
 
-    def test_environment_variables_array(self):
+    def test_package_has_no_environment_variables(self):
         data = json.loads(Path("server.json").read_text())
-        env_vars = data["packages"][0]["environmentVariables"]
-        names = {v["name"] for v in env_vars}
-        assert "LANHU_COOKIE" in names
-        assert "DDS_COOKIE" in names
-        assert "AUTO_BROWSER_COOKIES" in names
-
-    def test_lanhu_cookie_not_required(self):
-        data = json.loads(Path("server.json").read_text())
-        for v in data["packages"][0]["environmentVariables"]:
-            if v["name"] == "LANHU_COOKIE":
-                assert v["isRequired"] is False
-                assert v["isSecret"] is True
-
-    def test_auto_browser_cookies_default_false(self):
-        data = json.loads(Path("server.json").read_text())
-        for v in data["packages"][0]["environmentVariables"]:
-            if v["name"] == "AUTO_BROWSER_COOKIES":
-                assert v.get("default") == "false"
+        assert "environmentVariables" not in data["packages"][0]
 
     def test_no_unsupported_old_fields(self):
         data = json.loads(Path("server.json").read_text())
@@ -164,7 +147,7 @@ class TestDocs:
 
     def test_readme_has_managed_profile_reference(self):
         readme = Path("README.md").read_text(encoding="utf-8")
-        assert "Chrome 配置" in readme or "Chrome profile" in readme
+        assert "Chrome 配置" in readme or "Chrome Profile" in readme
 
     def test_smoke_test_doc_exists(self):
         smoke = Path("docs/manual-auth-smoke-test.md")
