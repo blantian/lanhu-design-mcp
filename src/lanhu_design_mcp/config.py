@@ -1,4 +1,4 @@
-"""Minimal settings model for managed Lanhu authentication results."""
+"""蓝湖：Minimal settings model for managed Lanhu authentication results."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ CookieSource = Literal["managed_browser", "missing"]
 
 @dataclass(frozen=True)
 class CookieInfo:
-    """Resolved session header and safe diagnostic names from the managed browser."""
+    """蓝湖：Resolved session header and safe diagnostic names from the managed browser."""
 
     configured: bool
     cookie: str
@@ -20,7 +20,7 @@ class CookieInfo:
 
 @dataclass(frozen=True)
 class Settings:
-    """Client configuration shared by Lanhu API and DDS requests."""
+    """蓝湖：Client configuration shared by Lanhu API and DDS requests."""
 
     lanhu_cookie: str
     dds_cookie: str
@@ -30,7 +30,7 @@ class Settings:
 
 
 def settings_from_cookie(info: CookieInfo) -> Settings:
-    """Convert a validated managed session into Lanhu client configuration."""
+    """蓝湖：Convert a validated managed session into Lanhu client configuration."""
     return Settings(
         lanhu_cookie=info.cookie,
         dds_cookie=info.cookie,

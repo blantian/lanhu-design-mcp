@@ -1,4 +1,4 @@
-from __future__ import annotations
+"""蓝湖。"""
 
 from typing import Any
 
@@ -12,21 +12,24 @@ DDS_BASE_URL = "https://dds.lanhuapp.com"
 
 
 class LanhuAuthError(RuntimeError):
+    """蓝湖。"""
     pass
 
 
 class LanhuAuthRequiredError(LanhuAuthError):
-    """Structured authentication-required error with no secrets."""
+    """蓝湖：Structured authentication-required error with no secrets."""
 
     def __init__(self) -> None:
+        """蓝湖。"""
         super().__init__("Lanhu authentication is required; call lanhu_auth_login")
 
     def to_dict(self) -> dict[str, str]:
+        """蓝湖。"""
         return {"status": "auth_required", "nextAction": "lanhu_auth_login"}
 
 
 def raise_for_lanhu_auth(response: httpx.Response) -> None:
-    """Raise LanhuAuthRequiredError on strong authentication-failure evidence.
+    """蓝湖：Raise LanhuAuthRequiredError on strong authentication-failure evidence.
 
     Does NOT classify a plain 403 as expired/missing auth — that stays a
     normal HTTP error owned by the caller.
@@ -34,8 +37,8 @@ def raise_for_lanhu_auth(response: httpx.Response) -> None:
     if response.status_code in {401, 418}:
         raise LanhuAuthRequiredError()
 
-    # Redirect evidence: a redirect response whose Location targets login,
-    # OR a followed-request history whose Location targets login.
+    # 蓝湖：重定向证据——Location指向登录的重定向响应
+    # 蓝湖：或已跟随请求的历史中包含登录重定向
     location = response.headers.get("location", "")
     if response.is_redirect and "login" in location.lower():
         raise LanhuAuthRequiredError()
@@ -47,7 +50,9 @@ def raise_for_lanhu_auth(response: httpx.Response) -> None:
 
 
 class LanhuClient:
+    """蓝湖。"""
     def __init__(self, settings: Settings):
+        """蓝湖。"""
         if not settings.lanhu_cookie:
             raise LanhuAuthRequiredError()
         self.settings = settings
@@ -65,15 +70,19 @@ class LanhuClient:
         )
 
     async def close(self) -> None:
+        """蓝湖。"""
         await self.client.aclose()
 
     async def __aenter__(self) -> "LanhuClient":
+        """蓝湖。"""
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
+        """蓝湖。"""
         await self.close()
 
     async def get_designs(self, ref: LanhuUrl) -> dict[str, Any]:
+        """蓝湖。"""
         params: dict[str, Any] = {
             "project_id": ref.project_id,
             "dds_status": 1,
@@ -114,6 +123,7 @@ class LanhuClient:
         }
 
     async def get_version_id(self, ref: LanhuUrl, image_id: str) -> str:
+        """蓝湖。"""
         params: dict[str, Any] = {
             "project_id": ref.project_id,
             "img_limit": 500,
@@ -136,6 +146,7 @@ class LanhuClient:
         raise RuntimeError(f"Design image_id not found: {image_id}")
 
     async def get_design_schema(self, ref: LanhuUrl, image_id: str) -> dict[str, Any]:
+        """蓝湖。"""
         version_id = await self.get_version_id(ref, image_id)
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
@@ -159,6 +170,7 @@ class LanhuClient:
             return schema_response.json()
 
     async def get_sketch_json(self, ref: LanhuUrl, image_id: str) -> dict[str, Any]:
+        """蓝湖。"""
         params: dict[str, Any] = {
             "dds_status": 1,
             "image_id": image_id,
@@ -175,6 +187,7 @@ class LanhuClient:
         return data.get("data") or data.get("result") or {}
 
     async def get_design_asset_source(self, ref: LanhuUrl, image_id: str) -> dict[str, Any]:
+        """蓝湖。"""
         metadata = await self.get_sketch_json(ref, image_id)
         versions = metadata.get("versions") or []
         if not versions or not isinstance(versions[0], dict):

@@ -1,4 +1,4 @@
-from __future__ import annotations
+"""蓝湖。"""
 
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlparse
 
 @dataclass(frozen=True)
 class LanhuUrl:
+    """蓝湖。"""
     project_id: str
     team_id: str | None = None
     image_id: str | None = None
@@ -15,6 +16,7 @@ class LanhuUrl:
 
 
 def parse_lanhu_url(value: str) -> LanhuUrl:
+    """蓝湖。"""
     if not value:
         raise ValueError("Lanhu URL is empty")
 

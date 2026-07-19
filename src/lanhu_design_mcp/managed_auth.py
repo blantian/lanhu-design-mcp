@@ -1,4 +1,4 @@
-"""Managed browser authentication — profiles, cookie safety, login state machine."""
+"""蓝湖：Managed browser authentication — profiles, cookie safety, login state machine."""
 
 from __future__ import annotations
 
@@ -34,15 +34,16 @@ PROFILE_MARKER = ".lanhu-design-mcp-profile"
 
 
 class UnsafeProfileError(RuntimeError):
-    """Raised when a profile operation targets an unsafe directory."""
+    """蓝湖：Raised when a profile operation targets an unsafe directory."""
 
 
 class UnsupportedPlatformError(RuntimeError):
-    """The current operating system is not formally supported."""
+    """蓝湖：The current operating system is not formally supported."""
 
 
 @dataclass(frozen=True)
 class AuthSnapshot:
+    """蓝湖。"""
     status: AuthStatus
     authenticated: bool
     source: str
@@ -51,6 +52,7 @@ class AuthSnapshot:
     message: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        """蓝湖。"""
         result: dict[str, Any] = {
             "status": self.status,
             "authenticated": self.authenticated,
@@ -63,16 +65,16 @@ class AuthSnapshot:
         return result
 
 
-# ---------------------------------------------------------------------------
-# profile directory resolution
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- 蓝湖
+# Profile 路径解析
+# --------------------------------------------------------------------------- 蓝湖
 
 
 def default_profile_dir(
     system: str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> Path:
-    """Return the macOS managed browser profile directory.
+    """蓝湖：Return the macOS managed browser profile directory.
 
     Raises :exc:`UnsupportedPlatformError` on any non-Darwin system.
     """
@@ -88,13 +90,13 @@ def default_profile_dir(
     return base / "lanhu-design-mcp" / "browser-profile"
 
 
-# ---------------------------------------------------------------------------
-# cookie filtering and formatting
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- 蓝湖
+# Cookie 过滤与格式化
+# --------------------------------------------------------------------------- 蓝湖
 
 
 def _normalize_domain(raw: str) -> str:
-    """Normalize a cookie domain for exact allowlist membership.
+    """蓝湖：Normalize a cookie domain for exact allowlist membership.
 
     Strips whitespace, lowercases, removes one trailing DNS dot (but preserves
     a leading dot for subdomain wildcard semantics).
@@ -108,7 +110,7 @@ def _normalize_domain(raw: str) -> str:
 
 
 def filter_lanhu_cookies(cookies: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Return only cookies whose normalized domain is in the Lanhu allowlist.
+    """蓝湖：Return only cookies whose normalized domain is in the Lanhu allowlist.
 
     Uses exact set membership after normalization, never substring matching.
     """
@@ -123,7 +125,7 @@ def filter_lanhu_cookies(cookies: Sequence[Mapping[str, Any]]) -> list[dict[str,
 
 
 def format_cookie_header(cookies: Sequence[Mapping[str, Any]]) -> str:
-    """Format an already-filtered cookie list into a ``name=value; ...`` header.
+    """蓝湖：Format an already-filtered cookie list into a ``name=value; ...`` header.
 
     Cookies are sorted by name for deterministic output.
     """
@@ -134,18 +136,18 @@ def format_cookie_header(cookies: Sequence[Mapping[str, Any]]) -> str:
     return "; ".join(parts)
 
 
-# ---------------------------------------------------------------------------
-# profile lifecycle (marker-guarded)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- 蓝湖
+# Profile 生命周期（包标记保护）
+# --------------------------------------------------------------------------- 蓝湖
 
 
 def _is_default_chrome_profile(path: Path) -> bool:
-    """Return True if *path* appears to be Chrome's ordinary default profile."""
+    """蓝湖：Return True if *path* appears to be Chrome's ordinary default profile."""
     resolved = path.resolve()
     if resolved.name == "Default":
         return True
     parts = resolved.parts
-    # Check for ... /Google/Chrome/Default
+    # 蓝湖：检测 /Google/Chrome/Default
     for i, part in enumerate(parts):
         if part == "Google" and i + 2 < len(parts):
             if parts[i + 1] == "Chrome" and parts[i + 2] == "Default":
@@ -154,7 +156,7 @@ def _is_default_chrome_profile(path: Path) -> bool:
 
 
 def ensure_owned_profile(profile_dir: Path) -> None:
-    """Create the profile directory with a package marker.
+    """蓝湖：Create the profile directory with a package marker.
 
     Sets POSIX owner-only permissions (``0700``).  Rejects paths that resolve
     to Chrome's ordinary default profile.
@@ -166,7 +168,7 @@ def ensure_owned_profile(profile_dir: Path) -> None:
     marker = profile_dir / PROFILE_MARKER
     marker.touch()
 
-    # POSIX owner-only (skip on Windows)
+    # 蓝湖：POSIX仅所有者（Windows跳过）
     if os.name != "nt":
         current = stat_mod.S_IMODE(profile_dir.stat().st_mode)
         if current != 0o700:
@@ -174,7 +176,7 @@ def ensure_owned_profile(profile_dir: Path) -> None:
 
 
 def remove_owned_profile(profile_dir: Path) -> None:
-    """Delete *profile_dir* only if it contains the package marker as a direct child.
+    """蓝湖：Delete *profile_dir* only if it contains the package marker as a direct child.
 
     Resolves the target path and rejects symlinks.  Raises
     :exc:`UnsafeProfileError` when the marker is absent, nested deeper, or the
@@ -189,48 +191,56 @@ def remove_owned_profile(profile_dir: Path) -> None:
     shutil.rmtree(resolved)
 
 
-# =============================================================================
-# Async browser protocols and error types
-# =============================================================================
+# ============================================================================= 蓝湖
+# 异步浏览器协议与错误类型
+# ============================================================================= 蓝湖
 
 
 class AuthDependencyError(RuntimeError):
-    """Raised when a required optional dependency is missing."""
+    """蓝湖：Raised when a required optional dependency is missing."""
 
 
 class AuthProfileLockedError(RuntimeError):
-    """Raised when the managed browser profile is locked by another process."""
+    """蓝湖：Raised when the managed browser profile is locked by another process."""
 
 
 class BrowserSession(Protocol):
-    async def cookies(self) -> list[dict[str, Any]]: ...
-    def is_closed(self) -> bool: ...
-    async def close(self) -> None: ...
+    """蓝湖：浏览器会话协议。"""
+    async def cookies(self) -> list[dict[str, Any]]:
+        """蓝湖：返回当前上下文的所有Cookie。"""
+        ...
+    def is_closed(self) -> bool:
+        """蓝湖：窗口或上下文是否已关闭。"""
+        ...
+    async def close(self) -> None:
+        """蓝湖：关闭上下文并停止驱动。"""
+        ...
 
 
 class BrowserBackend(Protocol):
-    async def open(self, profile_dir: Path, *, headless: bool) -> BrowserSession: ...
+    """蓝湖：浏览器后端协议。"""
+    async def open(self, profile_dir: Path, *, headless: bool) -> BrowserSession:
+        """蓝湖：使用指定Profile打开浏览器上下文。"""
+        ...
 
 
 class SessionValidator(Protocol):
-    """Validate a Lanhu cookie header against the Lanhu auth endpoint.
+    """蓝湖：会话验证协议。"""
 
-    Returns True only on explicit positive evidence from the account endpoint.
-    Must fail closed on any error, non-2xx, or unexpected payload.
-    """
-
-    async def validate(self, cookie_header: str) -> bool: ...
+    async def validate(self, cookie_header: str) -> bool:
+        """蓝湖：验证Cookie头是否有效。"""
+        ...
 
 
-# =============================================================================
-# ManagedBrowserAuth — async state machine
-# =============================================================================
+# ============================================================================= 蓝湖
+# 托管浏览器认证——异步状态机
+# ============================================================================= 蓝湖
 
 AUTH_COOKIE_NAMES = {"session", "user_token"}
 
 
 class HttpSessionValidator:
-    """Validate a cookie header against Lanhu's account detail endpoint.
+    """蓝湖：Validate a cookie header against Lanhu's account detail endpoint.
 
     Live contract (project-independent):
       Authenticated → HTTP 200  ``{"code": "00000", "msg": ..., "result": {...}}``
@@ -242,9 +252,11 @@ class HttpSessionValidator:
     """
 
     def __init__(self, timeout: float = 10.0) -> None:
+        """蓝湖。"""
         self._timeout = timeout
 
     async def validate(self, cookie_header: str) -> bool:
+        """蓝湖。"""
         import httpx
 
         try:
@@ -264,11 +276,11 @@ class HttpSessionValidator:
         except Exception:
             return False
 
-        # Only 2xx responses are eligible.
+        # 蓝湖：仅2xx响应有资格进入正向分类
         if response.status_code < 200 or response.status_code >= 300:
             return False
 
-        # Auth-failure evidence on the response itself.
+        # 蓝湖：响应本身的认证失败证据
         if response.status_code in {401, 418}:
             return False
         location = response.headers.get("location", "")
@@ -287,14 +299,15 @@ class HttpSessionValidator:
         if not isinstance(data, dict):
             return False
 
-        # Explicit success contract: code == "00000"
+        # 蓝湖：显式成功契约——code=="00000"
         return data.get("code") == "00000"
 
 
 class PlaywrightBrowserBackend:
-    """Real browser backend using Playwright + installed Chrome (channel)."""
+    """蓝湖：Real browser backend using Playwright + installed Chrome (channel)."""
 
     async def open(self, profile_dir: Path, *, headless: bool) -> BrowserSession:
+        """蓝湖。"""
         try:
             from playwright.async_api import async_playwright  # type: ignore[import-untyped]
         except ImportError as exc:
@@ -336,11 +349,14 @@ class PlaywrightBrowserBackend:
                 raise
 
         class _PlaywrightSession:
+            """蓝湖。"""
             def __init__(self_):
+                """蓝湖。"""
                 self_._closed = False
                 self_._driver_stopped = False
 
                 def on_close(*args: Any) -> None:
+                    """蓝湖。"""
                     self_._closed = True
 
                 context.on("close", on_close)
@@ -348,12 +364,15 @@ class PlaywrightBrowserBackend:
                     page.on("close", on_close)
 
             async def cookies(self_):
+                """蓝湖。"""
                 return await context.cookies()
 
             def is_closed(self_):
+                """蓝湖。"""
                 return self_._closed
 
             async def close(self_):
+                """蓝湖。"""
                 if self_._closed and self_._driver_stopped:
                     return
                 self_._closed = True
@@ -371,7 +390,7 @@ class PlaywrightBrowserBackend:
 
 
 class ManagedBrowserAuth:
-    """Owns the managed Chrome profile login lifecycle."""
+    """蓝湖：Owns the managed Chrome profile login lifecycle."""
 
     def __init__(
         self,
@@ -383,6 +402,7 @@ class ManagedBrowserAuth:
         session_validator: SessionValidator | None = None,
         system: str | None = None,
     ):
+        """蓝湖。"""
         self._backend_impl = backend
         self._profile_path = profile_dir
         self._timeout = timeout
@@ -398,18 +418,21 @@ class ManagedBrowserAuth:
         self._state: AuthStatus = "missing"
         self._message: str | None = None
 
-    # ------------------------------------------------------------------
-    # helpers
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ 蓝湖
+# 内部辅助方法
+    # ------------------------------------------------------------------ 蓝湖
 
     def _is_supported_platform(self) -> bool:
+        """蓝湖。"""
         return (self._system or platform.system()) == "Darwin"
 
     @staticmethod
     def _safe_unsupported_platform_message() -> str:
+        """蓝湖。"""
         return "Managed Lanhu login is supported on macOS only."
 
     def _reject_unsupported_platform(self) -> bool:
+        """蓝湖。"""
         if self._is_supported_platform():
             return False
         self._state = "unsupported_platform"
@@ -417,21 +440,25 @@ class ManagedBrowserAuth:
         return True
 
     def _resolve_profile(self) -> Path:
+        """蓝湖。"""
         if self._profile_path is None:
             self._profile_path = default_profile_dir()
         return self._profile_path
 
     def _resolve_backend(self) -> BrowserBackend:
+        """蓝湖。"""
         if self._backend_impl is None:
             self._backend_impl = PlaywrightBrowserBackend()
         return self._backend_impl
 
     def _resolve_validator(self) -> SessionValidator:
+        """蓝湖。"""
         if self._validator_impl is None:
             self._validator_impl = HttpSessionValidator()
         return self._validator_impl
 
     def _snapshot(self) -> AuthSnapshot:
+        """蓝湖。"""
         return AuthSnapshot(
             status=self._state,
             authenticated=self._state == "authenticated",
@@ -442,29 +469,35 @@ class ManagedBrowserAuth:
         )
 
     def _has_auth_cookie(self, cookies: list[dict[str, Any]]) -> bool:
+        """蓝湖。"""
         allowed = filter_lanhu_cookies(cookies)
         return any(c["name"].lower() in AUTH_COOKIE_NAMES for c in allowed)
 
     @staticmethod
     def _safe_dependency_message() -> str:
+        """蓝湖。"""
         return "Automatic login dependencies are not available. Install with: pip install --upgrade lanhu-design-mcp"
 
     @staticmethod
     def _safe_profile_locked_message() -> str:
+        """蓝湖。"""
         return "The managed browser profile is locked by another process."
 
     @staticmethod
     def _safe_failure_message() -> str:
+        """蓝湖。"""
         return "An unexpected error occurred during login."
 
-    # ------------------------------------------------------------------
-    # public API
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ 蓝湖
+# 公开API
+    # ------------------------------------------------------------------ 蓝湖
 
     def status_now(self) -> dict[str, Any]:
+        """蓝湖。"""
         return self._snapshot().to_dict()
 
     async def status(self, session_id: str | None = None, *, probe_profile: bool = False) -> dict[str, Any]:
+        """蓝湖。"""
         if session_id is not None and session_id != self._session_id:
             return AuthSnapshot("missing", False, "missing", [], session_id=session_id).to_dict()
         if probe_profile and self._state == "missing" and not self._cached_header:
@@ -472,6 +505,7 @@ class ManagedBrowserAuth:
         return self._snapshot().to_dict()
 
     async def start_login(self) -> dict[str, Any]:
+        """蓝湖。"""
         if self._reject_unsupported_platform():
             return self._snapshot().to_dict()
         async with self._state_lock:
@@ -485,6 +519,7 @@ class ManagedBrowserAuth:
             return self._snapshot().to_dict()
 
     async def resolve_cookie(self) -> CookieInfo:
+        """蓝湖。"""
         if self._reject_unsupported_platform():
             return CookieInfo(False, "", "missing", [])
         if self._cached_header:
@@ -536,12 +571,14 @@ class ManagedBrowserAuth:
             return CookieInfo(True, header, "managed_browser", list(self._cached_names))
 
     def invalidate(self) -> None:
+        """蓝湖。"""
         self._cached_header = None
         self._cached_names = []
         if self._state == "authenticated":
             self._state = "expired"
 
     async def logout(self, confirm: bool = False) -> dict[str, Any]:
+        """蓝湖。"""
         if not confirm:
             return {"status": "confirmation_required", "message": "Set confirm=true to delete the managed profile."}
 
@@ -569,6 +606,7 @@ class ManagedBrowserAuth:
         return {"status": "logged_out"}
 
     async def wait_for_terminal_state(self) -> None:
+        """蓝湖。"""
         if self._task and not self._task.done():
             try:
                 await self._task
@@ -576,6 +614,7 @@ class ManagedBrowserAuth:
                 pass
 
     async def shutdown(self) -> None:
+        """蓝湖。"""
         if self._task and not self._task.done():
             self._task.cancel()
             try:
@@ -585,11 +624,12 @@ class ManagedBrowserAuth:
             self._task = None
         self._state = "missing"
 
-    # ------------------------------------------------------------------
-    # internal worker
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ 蓝湖
+# 内部登录worker
+    # ------------------------------------------------------------------ 蓝湖
 
     async def _login_worker(self) -> None:
+        """蓝湖。"""
         session: BrowserSession | None = None
         try:
             profile = self._resolve_profile()
@@ -628,13 +668,13 @@ class ManagedBrowserAuth:
                                     self._message = None
                                     return
                             except Exception:
-                                pass  # validator error — keep polling
-                            # Stale/negative — keep polling
+                                pass  # 蓝湖：验证器错误——继续轮询
+                            # 蓝湖：过期或否定——继续轮询
 
                         await asyncio.sleep(self._poll_interval)
                 finally:
-                    # Always call close while holding the lock — even if externally
-                    # closed (is_closed=True), the driver may not yet be stopped.
+                    # 蓝湖：在持有锁期间始终调用close — even if externally
+                    # 蓝湖：已关闭但驱动可能尚未停止
                     if session is not None:
                         try:
                             await session.close()
@@ -655,14 +695,15 @@ class ManagedBrowserAuth:
             self._message = self._safe_failure_message()
 
 
-# =============================================================================
-# singleton
-# =============================================================================
+# ============================================================================= 蓝湖
+# 进程级单例
+# ============================================================================= 蓝湖
 
 _managed_auth: ManagedBrowserAuth | None = None
 
 
 def get_managed_auth() -> ManagedBrowserAuth:
+    """蓝湖。"""
     global _managed_auth
     if _managed_auth is None:
         _managed_auth = ManagedBrowserAuth()

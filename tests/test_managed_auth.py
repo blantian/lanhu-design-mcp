@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import stat
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -14,7 +12,6 @@ import pytest
 from lanhu_design_mcp.config import CookieInfo
 from lanhu_design_mcp.managed_auth import (
     LANHU_DOMAINS,
-    PROFILE_MARKER,
     AuthDependencyError,
     AuthProfileLockedError,
     AuthSnapshot,

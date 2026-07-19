@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
 
 from lanhu_design_mcp.client import (
-    LanhuAuthError,
     LanhuAuthRequiredError,
     LanhuClient,
     raise_for_lanhu_auth,
@@ -23,7 +21,6 @@ def test_client_has_get_design_asset_source():
     spec = importlib.util.find_spec("lanhu_design_mcp.client")
     assert spec is not None, "lanhu_design_mcp.client module is missing"
 
-    import lanhu_design_mcp.client as client_mod
 
     assert hasattr(LanhuClient, "get_design_asset_source"), (
         "LanhuClient.get_design_asset_source is missing; "

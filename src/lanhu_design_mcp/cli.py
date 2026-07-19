@@ -1,4 +1,4 @@
-"""CLI entry point for lanhu-design-mcp.
+"""蓝湖：CLI entry point for lanhu-design-mcp.
 
 No-argument invocation starts the MCP server.  ``auth login|status|logout``
 manage the local Chrome authentication profile.
@@ -15,6 +15,7 @@ from .managed_auth import get_managed_auth
 
 
 def main(argv: Sequence[str] | None = None) -> int | None:
+    """蓝湖。"""
     if argv is None:
         argv = sys.argv[1:]
 
@@ -37,6 +38,7 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
 
 def _auth_cmd(argv: Sequence[str]) -> int:
+    """蓝湖。"""
     if not argv:
         print("Usage: lanhu-design-mcp auth [login|status|logout]", file=sys.stderr)
         return 2
@@ -67,6 +69,7 @@ def _auth_cmd(argv: Sequence[str]) -> int:
 
 
 def _run_async(coro) -> int:
+    """蓝湖。"""
     try:
         return asyncio.run(coro)
     except Exception:
@@ -78,6 +81,7 @@ def _run_async(coro) -> int:
 
 
 async def _auth_login() -> int:
+    """蓝湖。"""
     auth = get_managed_auth()
     await auth.start_login()
     await auth.wait_for_terminal_state()
@@ -87,6 +91,7 @@ async def _auth_login() -> int:
 
 
 async def _auth_status() -> int:
+    """蓝湖。"""
     auth = get_managed_auth()
     result = await auth.status(probe_profile=True)
     print(json.dumps(result, ensure_ascii=False))
@@ -94,6 +99,7 @@ async def _auth_status() -> int:
 
 
 async def _auth_logout(confirm: bool) -> int:
+    """蓝湖。"""
     auth = get_managed_auth()
     result = await auth.logout(confirm)
     print(json.dumps(result, ensure_ascii=False))

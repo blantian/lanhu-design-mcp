@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

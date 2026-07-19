@@ -1,4 +1,4 @@
-from __future__ import annotations
+"""蓝湖。"""
 
 from contextlib import asynccontextmanager
 from typing import Any
@@ -14,6 +14,7 @@ from .url_parser import LanhuUrl, parse_lanhu_url
 
 
 def resolve_design(designs: list[dict[str, Any]], ref: LanhuUrl, selector: str | int | None) -> dict[str, Any]:
+    """蓝湖。"""
     if selector is None and ref.image_id:
         selector = ref.image_id
     if selector is None:
@@ -37,14 +38,17 @@ def resolve_design(designs: list[dict[str, Any]], ref: LanhuUrl, selector: str |
 
 
 class DesignService:
+    """蓝湖。"""
     def __init__(self, managed_auth=None):
-        self.managed_auth = managed_auth  # injected for tests; lazily imported for production
+        """蓝湖。"""
+        self.managed_auth = managed_auth  # 蓝湖：测试注入点，生产环境延迟加载
 
-    # ------------------------------------------------------------------
-    # async credential resolution
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ 蓝湖
+# 异步凭证解析
+    # ------------------------------------------------------------------ 蓝湖
 
     async def _resolve_settings(self):
+        """蓝湖。"""
         if self.managed_auth is None:
             from .managed_auth import get_managed_auth
             self.managed_auth = get_managed_auth()
@@ -55,6 +59,7 @@ class DesignService:
 
     @asynccontextmanager
     async def _client(self):
+        """蓝湖。"""
         settings = await self._resolve_settings()
         try:
             async with LanhuClient(settings) as client:
@@ -64,11 +69,12 @@ class DesignService:
                 self.managed_auth.invalidate()
             raise
 
-    # ------------------------------------------------------------------
-    # public operations — all route through _client()
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ 蓝湖
+# 公开操作——全部通过_client()路由
+    # ------------------------------------------------------------------ 蓝湖
 
     async def get_designs(self, url: str) -> dict[str, Any]:
+        """蓝湖。"""
         ref = parse_lanhu_url(url)
         async with self._client() as client:
             return await client.get_designs(ref)
@@ -79,6 +85,7 @@ class DesignService:
         design_name_or_index: str | int | None = None,
         target_platform: TargetPlatform = "android",
     ) -> dict[str, Any]:
+        """蓝湖。"""
         ref = parse_lanhu_url(url)
         async with self._client() as client:
             design_data = await client.get_designs(ref)
@@ -106,6 +113,7 @@ class DesignService:
         design_name_or_index: str | int | None = None,
         target_platform: TargetPlatform = "android",
     ) -> dict[str, Any]:
+        """蓝湖。"""
         ref = parse_lanhu_url(url)
         warnings: list[str] = []
         async with self._client() as client:
@@ -156,6 +164,7 @@ class DesignService:
         design_name_or_index: str | int | None = None,
         target_platform: TargetPlatform = "android",
     ) -> dict[str, Any]:
+        """蓝湖。"""
         analysis = await self.analyze_design(url, design_name_or_index, target_platform)
         assets = await self.get_design_assets(url, design_name_or_index, target_platform)
         return {

@@ -1,3 +1,4 @@
+"""蓝湖MCP提示文本。"""
 ANDROID_UI_RESTORE_PROMPT = """
 You are implementing an Android UI from Lanhu design data.
 

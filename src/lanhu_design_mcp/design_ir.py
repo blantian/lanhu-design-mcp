@@ -1,4 +1,4 @@
-from __future__ import annotations
+"""蓝湖。"""
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -8,6 +8,7 @@ from .platform_units import TargetPlatform, convert_rect, get_platform_spec
 
 @dataclass
 class DesignNode:
+    """蓝湖。"""
     id: str | None
     name: str
     type: str
@@ -19,6 +20,7 @@ class DesignNode:
 
 
 def _number(value: Any) -> float | None:
+    """蓝湖。"""
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, str):
@@ -30,11 +32,13 @@ def _number(value: Any) -> float | None:
 
 
 def _style(node: dict[str, Any]) -> dict[str, Any]:
+    """蓝湖。"""
     style = node.get("style")
     return style if isinstance(style, dict) else {}
 
 
 def _rect_from_style(style: dict[str, Any]) -> dict[str, float]:
+    """蓝湖。"""
     aliases = {
         "x": ("x", "left"),
         "y": ("y", "top"),
@@ -52,6 +56,7 @@ def _rect_from_style(style: dict[str, Any]) -> dict[str, float]:
 
 
 def _text_from_node(node: dict[str, Any]) -> str | None:
+    """蓝湖。"""
     data = node.get("data")
     if isinstance(data, dict):
         for key in ("text", "content", "value"):
@@ -67,6 +72,7 @@ def _text_from_node(node: dict[str, Any]) -> str | None:
 
 
 def _interesting_styles(style: dict[str, Any]) -> dict[str, Any]:
+    """蓝湖。"""
     wanted = (
         "background",
         "backgroundColor",
@@ -92,6 +98,7 @@ def build_design_node(
     depth: int = 0,
     max_depth: int = 8,
 ) -> DesignNode:
+    """蓝湖。"""
     style = _style(raw)
     rect_px = _rect_from_style(style)
     name = raw.get("eleName") or raw.get("componentName") or raw.get("name") or raw.get("id") or "node"
@@ -114,9 +121,11 @@ def build_design_node(
 
 
 def flatten_nodes(node: DesignNode, limit: int = 120) -> list[DesignNode]:
+    """蓝湖。"""
     result: list[DesignNode] = []
 
     def visit(current: DesignNode) -> None:
+        """蓝湖。"""
         if len(result) >= limit:
             return
         if current.text or current.rect_px or current.styles:
@@ -129,6 +138,7 @@ def flatten_nodes(node: DesignNode, limit: int = 120) -> list[DesignNode]:
 
 
 def node_to_dict(node: DesignNode) -> dict[str, Any]:
+    """蓝湖。"""
     return {
         "id": node.id,
         "name": node.name,
@@ -142,6 +152,7 @@ def node_to_dict(node: DesignNode) -> dict[str, Any]:
 
 
 def summarize_schema(schema: dict[str, Any], platform: TargetPlatform = "android") -> dict[str, Any]:
+    """蓝湖。"""
     root_style = _style(schema)
     root_rect = _rect_from_style(root_style)
     design_width = root_rect.get("width") or _number(root_style.get("width")) or 1920.0
