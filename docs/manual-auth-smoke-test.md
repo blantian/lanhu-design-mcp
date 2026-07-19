@@ -41,7 +41,7 @@ Cross-platform manual smoke test for managed Lanhu authentication. Execute on ea
    ```bash
    lanhu-design-mcp auth logout --confirm
    ```
-   Expected: CLI exits 0 with `"status": "logged_out"`. Only `~/.config/lanhu-design-mcp/browser-profile` (or platform equivalent) is removed. CAgent cookie file, env vars, and ordinary Chrome profiles are untouched.
+   Expected: CLI exits 0 with `"status": "logged_out"`. Only the managed profile path listed below is removed. CAgent cookie file, env vars, and ordinary Chrome profiles are untouched.
 
 ## Platform-Specific Paths
 
@@ -55,7 +55,7 @@ Cross-platform manual smoke test for managed Lanhu authentication. Execute on ea
 
 | Platform | Status | Notes |
 |---|---|---|
-| macOS | Pending | Current workstation validation required |
+| macOS | Passed (non-destructive) | 2026-07-19: interactive Chrome login, new-process profile reuse, real design and fine-grained asset retrieval, and PNG/SVG HTTP 200 verified. Expiry and confirmed logout were not executed so the reusable profile remains available; their lifecycle paths are covered by automated tests. |
 | Linux | Unverified | Checklist not yet executed |
 | Windows | Unverified | Checklist not yet executed |
 

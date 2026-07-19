@@ -215,7 +215,7 @@ class BrowserBackend(Protocol):
 class SessionValidator(Protocol):
     """Validate a Lanhu cookie header against the Lanhu auth endpoint.
 
-    Returns True only on explicit positive evidence (e.g. passport code=0).
+    Returns True only on explicit positive evidence from the account endpoint.
     Must fail closed on any error, non-2xx, or unexpected payload.
     """
 
