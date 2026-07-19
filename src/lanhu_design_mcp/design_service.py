@@ -1,4 +1,6 @@
-"""蓝湖。"""
+"""设计请求编排：凭证解析、客户端管理、资产与分析服务。"""
+
+from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from typing import Any
@@ -14,7 +16,7 @@ from .url_parser import LanhuUrl, parse_lanhu_url
 
 
 def resolve_design(designs: list[dict[str, Any]], ref: LanhuUrl, selector: str | int | None) -> dict[str, Any]:
-    """蓝湖。"""
+    """根据 URL 或选择器从项目列表中解析单个设计稿。"""
     if selector is None and ref.image_id:
         selector = ref.image_id
     if selector is None:
@@ -38,17 +40,17 @@ def resolve_design(designs: list[dict[str, Any]], ref: LanhuUrl, selector: str |
 
 
 class DesignService:
-    """蓝湖。"""
+    """设计请求编排器：解析凭证、调用客户端、返回资产与分析。"""
     def __init__(self, managed_auth=None):
-        """蓝湖。"""
+        """接受可选注入的 ManagedBrowserAuth 用于测试。"""
         self.managed_auth = managed_auth  # 蓝湖：测试注入点，生产环境延迟加载
 
-    # ------------------------------------------------------------------ 蓝湖
+# ---- 异步凭证与配置 ----
 # 异步凭证解析
-    # ------------------------------------------------------------------ 蓝湖
+# ---- 异步凭证与配置 ----
 
     async def _resolve_settings(self):
-        """蓝湖。"""
+        """从托管浏览器构建客户端配置，缺失时抛出认证错误。"""
         if self.managed_auth is None:
             from .managed_auth import get_managed_auth
             self.managed_auth = get_managed_auth()
@@ -59,7 +61,7 @@ class DesignService:
 
     @asynccontextmanager
     async def _client(self):
-        """蓝湖。"""
+        """异步上下文管理器：解析凭证、创建客户端，失败时失效缓存。"""
         settings = await self._resolve_settings()
         try:
             async with LanhuClient(settings) as client:
@@ -69,12 +71,12 @@ class DesignService:
                 self.managed_auth.invalidate()
             raise
 
-    # ------------------------------------------------------------------ 蓝湖
-# 公开操作——全部通过_client()路由
-    # ------------------------------------------------------------------ 蓝湖
+# ---- 异步凭证与配置 ----
+# 公开操作——全部通过 _client() 路由
+# ---- 异步凭证与配置 ----
 
     async def get_designs(self, url: str) -> dict[str, Any]:
-        """蓝湖。"""
+        """列出项目中的所有设计图。"""
         ref = parse_lanhu_url(url)
         async with self._client() as client:
             return await client.get_designs(ref)
@@ -85,7 +87,7 @@ class DesignService:
         design_name_or_index: str | int | None = None,
         target_platform: TargetPlatform = "android",
     ) -> dict[str, Any]:
-        """蓝湖。"""
+        """获取 DDS schema 并输出平台调整后的 DesignIR 摘要。"""
         ref = parse_lanhu_url(url)
         async with self._client() as client:
             design_data = await client.get_designs(ref)
@@ -113,7 +115,7 @@ class DesignService:
         design_name_or_index: str | int | None = None,
         target_platform: TargetPlatform = "android",
     ) -> dict[str, Any]:
-        """蓝湖。"""
+        """返回整张设计图与细粒度切图资源，认证失败不降级。"""
         ref = parse_lanhu_url(url)
         warnings: list[str] = []
         async with self._client() as client:
@@ -164,7 +166,7 @@ class DesignService:
         design_name_or_index: str | int | None = None,
         target_platform: TargetPlatform = "android",
     ) -> dict[str, Any]:
-        """蓝湖。"""
+        """合并分析结果和资产列表，附加 Agent 实现提示。"""
         analysis = await self.analyze_design(url, design_name_or_index, target_platform)
         assets = await self.get_design_assets(url, design_name_or_index, target_platform)
         return {

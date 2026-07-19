@@ -1,4 +1,4 @@
-"""蓝湖：Lanhu Design MCP package."""
+"""蓝湖设计 MCP 服务——读取设计稿、导出 UI 还原上下文。"""
 
 __all__ = ["__version__"]
 __version__ = "0.1.0"

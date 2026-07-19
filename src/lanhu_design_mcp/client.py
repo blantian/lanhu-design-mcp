@@ -1,4 +1,6 @@
-"""蓝湖。"""
+"""蓝湖 API 异步 HTTP 客户端、认证错误分类与响应检测。"""
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -12,28 +14,24 @@ DDS_BASE_URL = "https://dds.lanhuapp.com"
 
 
 class LanhuAuthError(RuntimeError):
-    """蓝湖。"""
+    """蓝湖认证相关错误的基类，子类包括结构化缺失与依赖错误。"""
     pass
 
 
 class LanhuAuthRequiredError(LanhuAuthError):
-    """蓝湖：Structured authentication-required error with no secrets."""
+    """结构化认证缺失错误，携带 nextAction 指引且不含任何凭据。"""
 
     def __init__(self) -> None:
-        """蓝湖。"""
+        """构造不含凭据的认证错误，固定安全消息文本。"""
         super().__init__("Lanhu authentication is required; call lanhu_auth_login")
 
     def to_dict(self) -> dict[str, str]:
-        """蓝湖。"""
+        """返回 auth_required 结构化载荷，不含 Cookie 或密码。"""
         return {"status": "auth_required", "nextAction": "lanhu_auth_login"}
 
 
 def raise_for_lanhu_auth(response: httpx.Response) -> None:
-    """蓝湖：Raise LanhuAuthRequiredError on strong authentication-failure evidence.
-
-    Does NOT classify a plain 403 as expired/missing auth — that stays a
-    normal HTTP error owned by the caller.
-    """
+    """在 401、418 或登录重定向时抛出认证错误；403 不在此列。"""
     if response.status_code in {401, 418}:
         raise LanhuAuthRequiredError()
 
@@ -50,9 +48,9 @@ def raise_for_lanhu_auth(response: httpx.Response) -> None:
 
 
 class LanhuClient:
-    """蓝湖。"""
+    """与蓝湖 API 和 DDS 通信的异步 HTTP 客户端。"""
     def __init__(self, settings: Settings):
-        """蓝湖。"""
+        """用包含 Cookie 头的 Settings 初始化客户端与 httpx 会话。"""
         if not settings.lanhu_cookie:
             raise LanhuAuthRequiredError()
         self.settings = settings
@@ -70,19 +68,19 @@ class LanhuClient:
         )
 
     async def close(self) -> None:
-        """蓝湖。"""
+        """关闭底层 httpx 客户端并释放连接池资源。"""
         await self.client.aclose()
 
     async def __aenter__(self) -> "LanhuClient":
-        """蓝湖。"""
+        """异步上下文进入自身，返回客户端实例。"""
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        """蓝湖。"""
+        """异步上下文退出，关闭 httpx 客户端。"""
         await self.close()
 
     async def get_designs(self, ref: LanhuUrl) -> dict[str, Any]:
-        """蓝湖。"""
+        """获取项目设计图列表及元数据。"""
         params: dict[str, Any] = {
             "project_id": ref.project_id,
             "dds_status": 1,
@@ -123,7 +121,7 @@ class LanhuClient:
         }
 
     async def get_version_id(self, ref: LanhuUrl, image_id: str) -> str:
-        """蓝湖。"""
+        """根据 image_id 查找最新版本标识。"""
         params: dict[str, Any] = {
             "project_id": ref.project_id,
             "img_limit": 500,
@@ -146,7 +144,7 @@ class LanhuClient:
         raise RuntimeError(f"Design image_id not found: {image_id}")
 
     async def get_design_schema(self, ref: LanhuUrl, image_id: str) -> dict[str, Any]:
-        """蓝湖。"""
+        """获取指定设计的 DDS schema 并下载完整 JSON。"""
         version_id = await self.get_version_id(ref, image_id)
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
@@ -170,7 +168,7 @@ class LanhuClient:
             return schema_response.json()
 
     async def get_sketch_json(self, ref: LanhuUrl, image_id: str) -> dict[str, Any]:
-        """蓝湖。"""
+        """获取与 image_id 关联的设计元数据（版本列表与 json_url）。"""
         params: dict[str, Any] = {
             "dds_status": 1,
             "image_id": image_id,
@@ -187,7 +185,7 @@ class LanhuClient:
         return data.get("data") or data.get("result") or {}
 
     async def get_design_asset_source(self, ref: LanhuUrl, image_id: str) -> dict[str, Any]:
-        """蓝湖。"""
+        """从最新版本 SketchJSON 中获取细粒度切图源数据。"""
         metadata = await self.get_sketch_json(ref, image_id)
         versions = metadata.get("versions") or []
         if not versions or not isinstance(versions[0], dict):

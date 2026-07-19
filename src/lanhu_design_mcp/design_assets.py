@@ -1,4 +1,6 @@
-"""蓝湖。"""
+"""细粒度切图提取：多倍率 URL、文件名清理、Sketch/Figma/PS 遍历与去重。"""
+
+from __future__ import annotations
 
 import math
 import re
@@ -6,17 +8,17 @@ from typing import Any
 
 
 def _js_round(value: float) -> int:
-    """蓝湖。"""
+    """JavaScript 兼容半上调入：floor(value + 0.5)。"""
     return math.floor(value + 0.5)
 
 
 def _resize_url(image_url: str, width: int, height: int) -> str:
-    """蓝湖。"""
+    """生成阿里云 OSS resize 参数 URL，保证宽高至少为 1。"""
     return f"{image_url}?x-oss-process=image/resize,w_{max(1, width)},h_{max(1, height)}/format,png"
 
 
 def build_scale_urls(image_url: str, logical_width: float, logical_height: float, slice_scale: int) -> dict[str, str]:
-    """蓝湖。"""
+    """生成 Web、iOS、Android 共 11 种多倍率 PNG 地址。"""
     if not image_url or not logical_width or not logical_height:
         return {}
     width = max(1, int(round(logical_width)))
@@ -26,7 +28,7 @@ def build_scale_urls(image_url: str, logical_width: float, logical_height: float
     stored_height = height * scale
 
     def make_url(output_width: int, output_height: int) -> str:
-        """蓝湖。"""
+        """比较输出与存储尺寸；匹配时返回原始URL。"""
         output_width = max(1, output_width)
         output_height = max(1, output_height)
         if output_width == stored_width and output_height == stored_height:
@@ -51,7 +53,7 @@ def build_scale_urls(image_url: str, logical_width: float, logical_height: float
 
 
 def build_ps_scale_urls(image_url: str, base_width: float, base_height: float) -> dict[str, str]:
-    """蓝湖。"""
+    """从 Photoshop 基准尺寸生成 11 种多倍率 PNG 地址。"""
     if not image_url or not base_width or not base_height:
         return {}
     width = max(1, int(round(base_width)))
@@ -60,7 +62,7 @@ def build_ps_scale_urls(image_url: str, base_width: float, base_height: float) -
     one_height = height / 2
 
     def make(multiplier: float) -> str:
-        """蓝湖。"""
+        """按倍率计算OSS resize URL。"""
         return _resize_url(image_url, _js_round(one_width * multiplier), _js_round(one_height * multiplier))
 
     return {
@@ -72,14 +74,14 @@ def build_ps_scale_urls(image_url: str, base_width: float, base_height: float) -
 
 
 def sanitize_asset_name(name: str, fallback: str = "slice") -> str:
-    """蓝湖。"""
+    """将路径分隔符与控制字符替换为下划线，防止路径穿越。"""
     clean = re.sub(r"[\\/\x00-\x1f\x7f]+", "_", str(name or "")).strip(" ._")
     clean = clean.replace("..", "_").strip(" ._")
     return clean or fallback
 
 
 def assign_suggested_paths(assets: list[dict[str, Any]], design_id: str) -> None:
-    """蓝湖。"""
+    """为资源列表分配确定性本地路径，同名追加递增数字后缀。"""
     counts: dict[str, int] = {}
     for asset in assets:
         stem = sanitize_asset_name(asset.get("name") or "slice")
@@ -90,7 +92,7 @@ def assign_suggested_paths(assets: list[dict[str, Any]], design_id: str) -> None
 
 
 def _frame(obj: dict[str, Any]) -> dict[str, Any]:
-    """蓝湖。"""
+    """按优先级从 Sketch/Figma/PS 图层中提取位置与尺寸帧。"""
     for key in ("frame", "bounds", "layerOriginFrame", "ddsOriginFrame"):
         value = obj.get(key)
         if isinstance(value, dict):
@@ -99,7 +101,7 @@ def _frame(obj: dict[str, Any]) -> dict[str, Any]:
 
 
 def _number(value: Any) -> float:
-    """蓝湖。"""
+    """将任意值安全转为 float，失败时默认返回 0。"""
     try:
         return float(value or 0)
     except (TypeError, ValueError):
@@ -107,7 +109,7 @@ def _number(value: Any) -> float:
 
 
 def _metadata(obj: dict[str, Any]) -> dict[str, Any]:
-    """蓝湖。"""
+    """从图层收集填充、描边、透明度、旋转、文字样式、阴影与圆角。"""
     result: dict[str, Any] = {}
     if obj.get("fills"): result["fills"] = obj["fills"]
     if obj.get("borders") or obj.get("strokes"): result["borders"] = obj.get("borders") or obj.get("strokes")
@@ -123,7 +125,7 @@ def _normalized_slice(
     obj: dict[str, Any], image: dict[str, Any], slice_scale: int,
     parent_name: str, layer_path: str, include_metadata: bool,
 ) -> dict[str, Any] | None:
-    """蓝湖。"""
+    """将单个图层与图片规范化为统一切图资源字典。"""
     png_url = image.get("imageUrl")
     svg_url = image.get("svgUrl")
     remote_url = png_url or svg_url
@@ -155,11 +157,11 @@ def _normalized_slice(
 
 
 def _extract_photoshop_slices(source: dict[str, Any], include_metadata: bool) -> list[dict[str, Any]]:
-    """蓝湖。"""
+    """从 PS source 的 assets[] 关联 isSlice 图层并提取切图。"""
     layers_by_id: dict[Any, dict[str, Any]] = {}
 
     def index(obj: dict[str, Any]) -> None:
-        """蓝湖。"""
+        """递归索引board与info中的图层ID映射。"""
         if obj.get("id") is not None: layers_by_id[obj["id"]] = obj
         for key in ("layers", "children"):
             for child in obj.get(key) or []:
@@ -204,7 +206,7 @@ def _extract_photoshop_slices(source: dict[str, Any], include_metadata: bool) ->
 
 
 def _deduplicate(assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """蓝湖。"""
+    """按 (id or layer_path, remote_url) 去重，保留首次出现。"""
     result: list[dict[str, Any]] = []
     seen: set[tuple[Any, Any]] = set()
     for asset in assets:
@@ -217,7 +219,7 @@ def _deduplicate(assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def extract_design_slices(source: dict[str, Any], design_id: str, include_metadata: bool = True) -> dict[str, Any]:
-    """蓝湖。"""
+    """递归遍历 Sketch/Figma/PS 并提取切图、分配路径、去重。"""
     meta = source.get("meta") if isinstance(source.get("meta"), dict) else {}
     slice_scale = int(source.get("sliceScale") or source.get("exportScale") or meta.get("sliceScale") or 2)
     is_figma = ((meta.get("host") or {}).get("name") or "").lower() == "figma"
@@ -231,7 +233,7 @@ def extract_design_slices(source: dict[str, Any], design_id: str, include_metada
     }
 
     def visit(obj: dict[str, Any], parent_name: str = "", parent_path: str = "") -> None:
-        """蓝湖。"""
+        """递归遍历图层树，识别可导出资源并规范化。"""
         nonlocal skipped_candidates
         name = str(obj.get("name") or "")
         path = f"{parent_path}/{name}" if parent_path and name else name or parent_path

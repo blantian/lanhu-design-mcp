@@ -1,8 +1,4 @@
-"""蓝湖：CLI entry point for lanhu-design-mcp.
-
-No-argument invocation starts the MCP server.  ``auth login|status|logout``
-manage the local Chrome authentication profile.
-"""
+"""CLI 入口：无参数启动 MCP 服务器；auth login|status|logout 管理托管 Chrome 认证。"""
 
 from __future__ import annotations
 
@@ -15,7 +11,7 @@ from .managed_auth import get_managed_auth
 
 
 def main(argv: Sequence[str] | None = None) -> int | None:
-    """蓝湖。"""
+    """无参数启动服务器，auth 子命令管理托管 Chrome 登录。"""
     if argv is None:
         argv = sys.argv[1:]
 
@@ -38,7 +34,7 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
 
 def _auth_cmd(argv: Sequence[str]) -> int:
-    """蓝湖。"""
+    """将 auth 子命令分派到登录、状态或登出，并校验参数数量。"""
     if not argv:
         print("Usage: lanhu-design-mcp auth [login|status|logout]", file=sys.stderr)
         return 2
@@ -69,7 +65,7 @@ def _auth_cmd(argv: Sequence[str]) -> int:
 
 
 def _run_async(coro) -> int:
-    """蓝湖。"""
+    """安全运行异步协程，失败时向 stderr 输出固定安全 JSON 并返回 1。"""
     try:
         return asyncio.run(coro)
     except Exception:
@@ -81,7 +77,7 @@ def _run_async(coro) -> int:
 
 
 async def _auth_login() -> int:
-    """蓝湖。"""
+    """启动可见登录、等待结束、输出状态 JSON；成功返回 0，否则 1。"""
     auth = get_managed_auth()
     await auth.start_login()
     await auth.wait_for_terminal_state()
@@ -91,7 +87,7 @@ async def _auth_login() -> int:
 
 
 async def _auth_status() -> int:
-    """蓝湖。"""
+    """探测托管认证并打印安全状态 JSON；仅 authenticated 返回 0。"""
     auth = get_managed_auth()
     result = await auth.status(probe_profile=True)
     print(json.dumps(result, ensure_ascii=False))
@@ -99,7 +95,7 @@ async def _auth_status() -> int:
 
 
 async def _auth_logout(confirm: bool) -> int:
-    """蓝湖。"""
+    """调用登出并打印结果 JSON；无 confirm 返回 1，成功登出返回 0。"""
     auth = get_managed_auth()
     result = await auth.logout(confirm)
     print(json.dumps(result, ensure_ascii=False))

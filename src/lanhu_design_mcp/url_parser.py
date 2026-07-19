@@ -1,4 +1,6 @@
-"""蓝湖。"""
+"""蓝湖 URL 解析：校验格式并提取项目、图片和团队标识。"""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
@@ -6,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 @dataclass(frozen=True)
 class LanhuUrl:
-    """蓝湖。"""
+    """已解析蓝湖 URL 的各个标识组件。"""
     project_id: str
     team_id: str | None = None
     image_id: str | None = None
@@ -16,7 +18,7 @@ class LanhuUrl:
 
 
 def parse_lanhu_url(value: str) -> LanhuUrl:
-    """蓝湖。"""
+    """校验蓝湖设计链接并提取项目、图片和团队标识。"""
     if not value:
         raise ValueError("Lanhu URL is empty")
 

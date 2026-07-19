@@ -1,4 +1,6 @@
-"""蓝湖。"""
+"""紧凑设计中间表示（DesignIR）：提取节点样式、矩形、文本并序列化为 Agent 友好格式。"""
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -8,7 +10,7 @@ from .platform_units import TargetPlatform, convert_rect, get_platform_spec
 
 @dataclass
 class DesignNode:
-    """蓝湖。"""
+    """紧凑设计中间表示节点，包含矩形、样式、文本和子节点。"""
     id: str | None
     name: str
     type: str
@@ -20,7 +22,7 @@ class DesignNode:
 
 
 def _number(value: Any) -> float | None:
-    """蓝湖。"""
+    """安全提取 float 值，失败时默认返回 0。"""
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, str):
@@ -32,13 +34,13 @@ def _number(value: Any) -> float | None:
 
 
 def _style(node: dict[str, Any]) -> dict[str, Any]:
-    """蓝湖。"""
+    """提取节点样式，优先 compact 格式。"""
     style = node.get("style")
     return style if isinstance(style, dict) else {}
 
 
 def _rect_from_style(style: dict[str, Any]) -> dict[str, float]:
-    """蓝湖。"""
+    """从 compact 或展开样式字典中提取像素矩形。"""
     aliases = {
         "x": ("x", "left"),
         "y": ("y", "top"),
@@ -56,7 +58,7 @@ def _rect_from_style(style: dict[str, Any]) -> dict[str, float]:
 
 
 def _text_from_node(node: dict[str, Any]) -> str | None:
-    """蓝湖。"""
+    """从节点中提取文本内容与样式信息。"""
     data = node.get("data")
     if isinstance(data, dict):
         for key in ("text", "content", "value"):
@@ -72,7 +74,7 @@ def _text_from_node(node: dict[str, Any]) -> str | None:
 
 
 def _interesting_styles(style: dict[str, Any]) -> dict[str, Any]:
-    """蓝湖。"""
+    """提取非默认值的视觉样式字典。"""
     wanted = (
         "background",
         "backgroundColor",
@@ -98,7 +100,7 @@ def build_design_node(
     depth: int = 0,
     max_depth: int = 8,
 ) -> DesignNode:
-    """蓝湖。"""
+    """递归构建 DesignNode，提取矩形、文本和子节点。"""
     style = _style(raw)
     rect_px = _rect_from_style(style)
     name = raw.get("eleName") or raw.get("componentName") or raw.get("name") or raw.get("id") or "node"
@@ -121,11 +123,11 @@ def build_design_node(
 
 
 def flatten_nodes(node: DesignNode, limit: int = 120) -> list[DesignNode]:
-    """蓝湖。"""
+    """若唯一子节点可替代父节点则扁平化设计树。"""
     result: list[DesignNode] = []
 
     def visit(current: DesignNode) -> None:
-        """蓝湖。"""
+        """递归收集可扁平化的单一子节点。"""
         if len(result) >= limit:
             return
         if current.text or current.rect_px or current.styles:
@@ -138,7 +140,7 @@ def flatten_nodes(node: DesignNode, limit: int = 120) -> list[DesignNode]:
 
 
 def node_to_dict(node: DesignNode) -> dict[str, Any]:
-    """蓝湖。"""
+    """将 DesignNode 树序列化为字典表示。"""
     return {
         "id": node.id,
         "name": node.name,
@@ -152,7 +154,7 @@ def node_to_dict(node: DesignNode) -> dict[str, Any]:
 
 
 def summarize_schema(schema: dict[str, Any], platform: TargetPlatform = "android") -> dict[str, Any]:
-    """蓝湖。"""
+    """将 DDS schema 构建为 DesignIR 根节点并序列化摘要。"""
     root_style = _style(schema)
     root_rect = _rect_from_style(root_style)
     design_width = root_rect.get("width") or _number(root_style.get("width")) or 1920.0

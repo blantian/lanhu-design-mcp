@@ -8,6 +8,7 @@ from pathlib import Path
 
 SOURCE_ROOT = Path("src/lanhu_design_mcp")
 CHINESE = re.compile(r"[㐀-鿿]")
+MIN_CHINESE_CHARS = 4
 COMMENT_DIRECTIVES = ("# type:", "# noqa", "# pragma:")
 
 
@@ -24,10 +25,10 @@ def test_modules_classes_and_functions_have_chinese_docstrings():
             if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             doc = ast.get_docstring(node, clean=True) or ""
-            if not CHINESE.search(doc):
+            if len(CHINESE.findall(doc)) < MIN_CHINESE_CHARS:
                 name = getattr(node, "name", "<module>")
                 line = getattr(node, "lineno", 1)
-                missing.append(f"{path}:{line}:{name}")
+                missing.append(f"{path}:{line}:{name} ({len(CHINESE.findall(doc))}zh)")
     assert missing == []
 
 
@@ -41,6 +42,6 @@ def test_non_directive_comments_contain_chinese_explanation():
             comment = token.string.strip()
             if comment.startswith(COMMENT_DIRECTIVES):
                 continue
-            if not CHINESE.search(comment):
-                invalid.append(f"{path}:{token.start[0]}:{comment}")
+            if len(CHINESE.findall(comment)) < MIN_CHINESE_CHARS:
+                invalid.append(f"{path}:{token.start[0]}:{comment} ({len(CHINESE.findall(comment))}zh)")
     assert invalid == []
