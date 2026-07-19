@@ -760,10 +760,13 @@ class ClosableFakeSession(FakeSession):
         if self._on_close:
             self._on_close()
     async def close(self):
-        if self._closed: return
+        if self._closed:
+            return
         self._closed = True
-        try: self._close_event.fire()
-        except Exception: pass
+        try:
+            self._close_event.fire()
+        except Exception:
+            pass
 
 
 class ClosableEventBackend:

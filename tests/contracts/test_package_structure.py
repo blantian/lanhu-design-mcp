@@ -1,6 +1,7 @@
 """验证 v0.2.0 的领域包结构，不允许旧模块重新出现。"""
 
 from importlib.util import find_spec
+from pathlib import Path
 
 import pytest
 
@@ -41,3 +42,9 @@ def test_design_exports_match_all():
 ])
 def test_old_design_modules_are_removed(name):
     assert find_spec(f"lanhu_design_mcp.{name}") is None
+
+
+def test_dead_and_historical_files_are_removed():
+    assert find_spec("lanhu_design_mcp.prompts") is None
+    assert not Path("docs").exists()
+    assert not Path("prompt").exists()

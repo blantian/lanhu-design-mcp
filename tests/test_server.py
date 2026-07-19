@@ -149,14 +149,6 @@ class TestDocs:
         readme = Path("README.md").read_text(encoding="utf-8")
         assert "Chrome 配置" in readme or "Chrome Profile" in readme
 
-    def test_smoke_test_doc_exists(self):
-        smoke = Path("docs/manual-auth-smoke-test.md")
-        assert smoke.exists()
-        text = smoke.read_text(encoding="utf-8")
-        assert "macOS" in text
-        assert "Linux" in text
-        assert "Windows" in text
-
 
 # ---------------------------------------------------------------------------
 # Release identity contract tests

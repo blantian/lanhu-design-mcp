@@ -6,19 +6,19 @@ import re
 import tokenize
 from pathlib import Path
 
-SOURCE_ROOT = Path("src/lanhu_design_mcp")
 CHINESE = re.compile(r"[㐀-鿿]")
 MIN_CHINESE_CHARS = 4
 COMMENT_DIRECTIVES = ("# type:", "# noqa", "# pragma:")
 
-
-def source_files() -> list[Path]:
-    return sorted(SOURCE_ROOT.glob("*.py"))
+SOURCE_FILES = sorted(
+    path for path in Path("src/lanhu_design_mcp").rglob("*.py")
+    if "__pycache__" not in path.parts
+)
 
 
 def test_modules_classes_and_functions_have_chinese_docstrings():
     missing: list[str] = []
-    for path in source_files():
+    for path in SOURCE_FILES:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         nodes = list(ast.walk(tree))
         for node in nodes:
@@ -34,7 +34,7 @@ def test_modules_classes_and_functions_have_chinese_docstrings():
 
 def test_non_directive_comments_contain_chinese_explanation():
     invalid: list[str] = []
-    for path in source_files():
+    for path in SOURCE_FILES:
         text = path.read_text(encoding="utf-8")
         for token in tokenize.generate_tokens(io.StringIO(text).readline):
             if token.type != tokenize.COMMENT:

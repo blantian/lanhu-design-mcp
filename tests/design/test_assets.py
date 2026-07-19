@@ -9,6 +9,7 @@ from lanhu_design_mcp.design.assets import (
     build_ps_scale_urls,
     build_scale_urls,
     sanitize_asset_name,
+    extract_design_slices,
 )
 
 
@@ -79,7 +80,6 @@ def test_safe_names_and_collisions_are_deterministic():
 # Task 2: Sketch and Figma slice extraction
 # ---------------------------------------------------------------------------
 
-from lanhu_design_mcp.design.assets import extract_design_slices
 
 
 def test_extracts_sketch_png_and_svg_slice():

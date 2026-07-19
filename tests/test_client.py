@@ -14,6 +14,7 @@ from lanhu_design_mcp.client import (
     raise_for_lanhu_auth,
 )
 from lanhu_design_mcp.auth.models import CookieInfo, Settings
+from lanhu_design_mcp.design.url import LanhuUrl
 
 
 def test_client_has_get_design_asset_source():
@@ -31,13 +32,6 @@ def test_client_has_get_design_asset_source():
 # ---------------------------------------------------------------------------
 # Behavior tests — asset source retrieval
 # ---------------------------------------------------------------------------
-
-
-from unittest.mock import AsyncMock, Mock
-
-import pytest
-
-from lanhu_design_mcp.design.url import LanhuUrl
 
 
 def settings() -> Settings:

@@ -111,13 +111,20 @@ def _number(value: Any) -> float:
 def _metadata(obj: dict[str, Any]) -> dict[str, Any]:
     """从图层收集填充、描边、透明度、旋转、文字样式、阴影与圆角。"""
     result: dict[str, Any] = {}
-    if obj.get("fills"): result["fills"] = obj["fills"]
-    if obj.get("borders") or obj.get("strokes"): result["borders"] = obj.get("borders") or obj.get("strokes")
-    if "opacity" in obj: result["opacity"] = obj["opacity"]
-    if obj.get("rotation"): result["rotation"] = obj["rotation"]
-    if obj.get("textStyle"): result["text_style"] = obj["textStyle"]
-    if obj.get("shadows"): result["shadows"] = obj["shadows"]
-    if obj.get("radius") or obj.get("cornerRadius"): result["border_radius"] = obj.get("radius") or obj.get("cornerRadius")
+    if obj.get("fills"):
+        result["fills"] = obj["fills"]
+    if obj.get("borders") or obj.get("strokes"):
+        result["borders"] = obj.get("borders") or obj.get("strokes")
+    if "opacity" in obj:
+        result["opacity"] = obj["opacity"]
+    if obj.get("rotation"):
+        result["rotation"] = obj["rotation"]
+    if obj.get("textStyle"):
+        result["text_style"] = obj["textStyle"]
+    if obj.get("shadows"):
+        result["shadows"] = obj["shadows"]
+    if obj.get("radius") or obj.get("cornerRadius"):
+        result["border_radius"] = obj.get("radius") or obj.get("cornerRadius")
     return result
 
 
@@ -141,7 +148,8 @@ def _normalized_slice(
         "format": "png" if png_url else "svg", "remote_url": remote_url,
         "layer_path": layer_path,
     }
-    if svg_url and png_url: asset["svg_url"] = svg_url
+    if svg_url and png_url:
+        asset["svg_url"] = svg_url
     if png_url and width and height:
         asset["scale_urls"] = build_scale_urls(png_url, width, height, slice_scale)
     if width and height:
@@ -150,9 +158,11 @@ def _normalized_slice(
     y = frame.get("y", frame.get("top", obj.get("top")))
     if x is not None and y is not None:
         asset["position_px"] = {"x": int(round(_number(x))), "y": int(round(_number(y)))}
-    if parent_name: asset["parent_name"] = parent_name
+    if parent_name:
+        asset["parent_name"] = parent_name
     metadata = _metadata(obj) if include_metadata else {}
-    if metadata: asset["metadata"] = metadata
+    if metadata:
+        asset["metadata"] = metadata
     return asset
 
 
@@ -162,44 +172,56 @@ def _extract_photoshop_slices(source: dict[str, Any], include_metadata: bool) ->
 
     def index(obj: dict[str, Any]) -> None:
         """递归索引board与info中的图层ID映射。"""
-        if obj.get("id") is not None: layers_by_id[obj["id"]] = obj
+        if obj.get("id") is not None:
+            layers_by_id[obj["id"]] = obj
         for key in ("layers", "children"):
             for child in obj.get(key) or []:
-                if isinstance(child, dict): index(child)
+                if isinstance(child, dict):
+                    index(child)
 
-    if isinstance(source.get("board"), dict): index(source["board"])
+    if isinstance(source.get("board"), dict):
+        index(source["board"])
     for item in source.get("info") or []:
-        if isinstance(item, dict): index(item)
+        if isinstance(item, dict):
+            index(item)
 
     result: list[dict[str, Any]] = []
     for source_asset in source.get("assets") or []:
-        if not isinstance(source_asset, dict) or source_asset.get("isSlice") is not True: continue
+        if not isinstance(source_asset, dict) or source_asset.get("isSlice") is not True:
+            continue
         layer = layers_by_id.get(source_asset.get("id"))
-        if not isinstance(layer, dict): continue
+        if not isinstance(layer, dict):
+            continue
         images = layer.get("images") if isinstance(layer.get("images"), dict) else {}
         png_url, svg_url = images.get("png_xxxhd"), images.get("svg")
         remote_url = png_url or svg_url
-        if not remote_url: continue
+        if not remote_url:
+            continue
         base_width = _number(layer.get("width"))
         base_height = _number(layer.get("height"))
         bounds = source_asset.get("bounds") if isinstance(source_asset.get("bounds"), dict) else {}
-        if not base_width: base_width = _number(bounds.get("right")) - _number(bounds.get("left"))
-        if not base_height: base_height = _number(bounds.get("bottom")) - _number(bounds.get("top"))
+        if not base_width:
+            base_width = _number(bounds.get("right")) - _number(bounds.get("left"))
+        if not base_height:
+            base_height = _number(bounds.get("bottom")) - _number(bounds.get("top"))
         asset: dict[str, Any] = {
             "kind": "slice", "id": layer.get("id"), "name": source_asset.get("name") or layer.get("name") or "slice",
             "type": layer.get("type") or "ps-slice", "format": "png" if png_url else "svg",
             "remote_url": remote_url, "layer_path": source_asset.get("name") or layer.get("name") or "slice",
         }
-        if png_url and svg_url: asset["svg_url"] = svg_url
+        if png_url and svg_url:
+            asset["svg_url"] = svg_url
         if base_width > 0 and base_height > 0:
             asset["base_size"] = {"width": int(round(base_width)), "height": int(round(base_height))}
             asset["logical_size"] = {"width": int(round(base_width / 2)), "height": int(round(base_height / 2))}
-            if png_url: asset["scale_urls"] = build_ps_scale_urls(png_url, base_width, base_height)
+            if png_url:
+                asset["scale_urls"] = build_ps_scale_urls(png_url, base_width, base_height)
         if layer.get("left") is not None and layer.get("top") is not None:
             asset["position_px"] = {"x": int(round(_number(layer["left"]))), "y": int(round(_number(layer["top"])))}
         if include_metadata:
             metadata = {"source": "photoshop", "asset_id": source_asset.get("id")}
-            if source_asset.get("scaleType") is not None: metadata["scaleType"] = source_asset["scaleType"]
+            if source_asset.get("scaleType") is not None:
+                metadata["scaleType"] = source_asset["scaleType"]
             asset["metadata"] = metadata
         result.append(asset)
     return result
@@ -255,12 +277,14 @@ def extract_design_slices(source: dict[str, Any], design_id: str, include_metada
             skipped_candidates += 1
         for key in ("layers", "children"):
             for child in obj.get(key) or []:
-                if isinstance(child, dict): visit(child, name or resolved_parent, path)
+                if isinstance(child, dict):
+                    visit(child, name or resolved_parent, path)
 
     artboard = source.get("artboard") if isinstance(source.get("artboard"), dict) else {}
     roots = (artboard.get("layers") or []) if artboard else (source.get("info") or [])
     for root in roots:
-        if isinstance(root, dict): visit(root)
+        if isinstance(root, dict):
+            visit(root)
     if skipped_candidates:
         warnings.append(f"Skipped {skipped_candidates} malformed slice candidate(s)")
     if str(source.get("type") or "").lower() == "ps":
