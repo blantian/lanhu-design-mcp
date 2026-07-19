@@ -5,3 +5,8 @@ from importlib.util import find_spec
 
 def test_auth_manager_module_exists():
     assert find_spec("lanhu_design_mcp.auth.manager") is not None
+
+
+def test_auth_foundation_modules_exist():
+    assert find_spec("lanhu_design_mcp.auth.models") is not None
+    assert find_spec("lanhu_design_mcp.auth.profile") is not None

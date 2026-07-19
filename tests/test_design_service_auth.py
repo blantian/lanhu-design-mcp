@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from lanhu_design_mcp.client import LanhuAuthRequiredError
-from lanhu_design_mcp.config import CookieInfo
+from lanhu_design_mcp.auth.models import CookieInfo
 from lanhu_design_mcp.design_service import DesignService
 from lanhu_design_mcp.auth.manager import ManagedBrowserAuth
 

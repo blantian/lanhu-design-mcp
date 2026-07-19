@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from .client import LanhuAuthRequiredError, LanhuClient
-from .config import settings_from_cookie
+from .auth.models import settings_from_cookie
 from .design_assets import assign_suggested_paths, extract_design_slices, sanitize_asset_name
 from .design_ir import summarize_schema
 from .platform_units import TargetPlatform

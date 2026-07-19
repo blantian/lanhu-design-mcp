@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from .config import Settings
+from .auth.models import Settings
 from .url_parser import LanhuUrl
 
 BASE_URL = "https://lanhuapp.com"

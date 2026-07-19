@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from lanhu_design_mcp.config import CookieInfo
+from lanhu_design_mcp.auth.models import CookieInfo
 from lanhu_design_mcp.design_service import DesignService
 
 URL = "https://lanhuapp.com/web/#/item/project/stage?pid=p1&image_id=i1"

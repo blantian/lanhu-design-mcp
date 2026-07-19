@@ -13,7 +13,7 @@ from lanhu_design_mcp.client import (
     LanhuClient,
     raise_for_lanhu_auth,
 )
-from lanhu_design_mcp.config import CookieInfo, Settings
+from lanhu_design_mcp.auth.models import CookieInfo, Settings
 
 
 def test_client_has_get_design_asset_source():
