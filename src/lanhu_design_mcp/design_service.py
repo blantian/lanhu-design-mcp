@@ -52,7 +52,7 @@ class DesignService:
     async def _resolve_settings(self):
         """从托管浏览器构建客户端配置，缺失时抛出认证错误。"""
         if self.managed_auth is None:
-            from .managed_auth import get_managed_auth
+            from .auth.manager import get_managed_auth
             self.managed_auth = get_managed_auth()
         info = await self.managed_auth.resolve_cookie()
         if not info.configured:

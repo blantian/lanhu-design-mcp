@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
-from .config import CookieInfo
+from ..config import CookieInfo
 
 AuthStatus = Literal[
     "missing",

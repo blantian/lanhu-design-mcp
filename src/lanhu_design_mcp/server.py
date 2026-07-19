@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from fastmcp import FastMCP
 
 from .design_service import DesignService
-from .managed_auth import get_managed_auth
+from .auth.manager import get_managed_auth
 
 TargetPlatformArg = Literal["web", "android", "ios", "wechat_miniprogram"]
 

@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from lanhu_design_mcp.config import CookieInfo
-from lanhu_design_mcp.managed_auth import (
+from lanhu_design_mcp.auth.manager import (
     LANHU_DOMAINS,
     AuthDependencyError,
     AuthProfileLockedError,
@@ -40,7 +40,7 @@ class TestDefaultProfileDir:
         assert path == expected
 
     def test_automatic_detection_darwin(self, tmp_path):
-        with patch("lanhu_design_mcp.managed_auth.platform.system", return_value="Darwin"):
+        with patch("lanhu_design_mcp.auth.manager.platform.system", return_value="Darwin"):
             path = default_profile_dir(environ={"HOME": str(tmp_path)})
         expected = tmp_path / "Library" / "Application Support" / "lanhu-design-mcp" / "browser-profile"
         assert path == expected
@@ -255,8 +255,8 @@ class TestWindowsMode:
     def test_ensure_owned_profile_does_not_chmod_on_windows(self, tmp_path):
         profile = tmp_path / "profile"
         with (
-            patch("lanhu_design_mcp.managed_auth.os.name", "nt"),
-            patch("lanhu_design_mcp.managed_auth.os.chmod") as mock_chmod,
+            patch("lanhu_design_mcp.auth.manager.os.name", "nt"),
+            patch("lanhu_design_mcp.auth.manager.os.chmod") as mock_chmod,
         ):
             try:
                 ensure_owned_profile(profile)
@@ -1379,7 +1379,7 @@ class TestHttpSessionValidator:
 # ===========================================================================
 
 
-from lanhu_design_mcp.managed_auth import UnsupportedPlatformError
+from lanhu_design_mcp.auth.manager import UnsupportedPlatformError
 
 
 class TestMacOSOnlyBoundary:

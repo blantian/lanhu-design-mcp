@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from lanhu_design_mcp.managed_auth import AuthSnapshot
+from lanhu_design_mcp.auth.manager import AuthSnapshot
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ import json
 import sys
 from typing import Sequence
 
-from .managed_auth import get_managed_auth
+from .auth.manager import get_managed_auth
 
 
 def main(argv: Sequence[str] | None = None) -> int | None:
