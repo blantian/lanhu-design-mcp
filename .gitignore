@@ -57,3 +57,8 @@ data/
 
 # MCP
 .mcp_lanhu_design.log
+
+# Local agent state
+.ccb/
+.claude/
+.superpowers/
