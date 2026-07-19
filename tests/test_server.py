@@ -73,7 +73,7 @@ class TestServerJson:
     def test_valid_json(self):
         data = json.loads(Path("server.json").read_text())
         assert data["name"] == "io.github.blantian/lanhu-design-mcp"
-        assert data["version"] == "0.1.1"
+        assert data["version"] == "0.2.0"
         assert "$schema" in data
 
     def test_description_length(self):
@@ -90,7 +90,7 @@ class TestServerJson:
         pkg = data["packages"][0]
         assert pkg["identifier"] == "lanhu-design-mcp"
         assert pkg["registryType"] == "pypi"
-        assert pkg["version"] == "0.1.1"
+        assert pkg["version"] == "0.2.0"
         assert pkg["transport"]["type"] == "stdio"
 
     def test_package_has_no_environment_variables(self):

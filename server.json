@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.blantian/lanhu-design-mcp",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Read Lanhu design specs and export fine-grained UI assets with platform-adjusted units",
   "repository": {
     "url": "https://github.com/blantian/lanhu-design-mcp",
@@ -11,7 +11,7 @@
     {
       "identifier": "lanhu-design-mcp",
       "registryType": "pypi",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "transport": {
         "type": "stdio"
       }

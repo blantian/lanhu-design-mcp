@@ -45,14 +45,15 @@ def test_removed_dependencies_are_absent():
     assert "playwright>=1.50.0" in text
 
 
-def test_public_versions_are_0_1_1():
+def test_public_versions_are_0_2_0():
     project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     server = json.loads(Path("server.json").read_text(encoding="utf-8"))
     init_text = Path("src/lanhu_design_mcp/__init__.py").read_text(encoding="utf-8")
-    assert project["project"]["version"] == "0.1.1"
-    assert server["version"] == "0.1.1"
-    assert server["packages"][0]["version"] == "0.1.1"
-    assert '__version__ = "0.1.1"' in init_text
+    expected = "0.2.0"
+    assert project["project"]["version"] == expected
+    assert server["version"] == expected
+    assert server["packages"][0]["version"] == expected
+    assert f'__version__ = "{expected}"' in init_text
 
 
 def test_registry_package_has_no_environment_configuration():
