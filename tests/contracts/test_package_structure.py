@@ -15,3 +15,7 @@ def test_auth_foundation_modules_exist():
 def test_auth_runtime_modules_exist():
     assert find_spec("lanhu_design_mcp.auth.validator") is not None
     assert find_spec("lanhu_design_mcp.auth.browser") is not None
+
+
+def test_old_auth_module_is_removed():
+    assert find_spec("lanhu_design_mcp.managed_auth") is None
